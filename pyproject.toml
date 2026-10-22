@@ -1,0 +1,19 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["F", "E", "W", "I", "B"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["passport_designer"]
+
+[tool.pyright]
+include = ["passport_designer", "tests", "main.py"]
+pythonVersion = "3.11"
+typeCheckingMode = "standard"

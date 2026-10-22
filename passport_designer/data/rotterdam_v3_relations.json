@@ -1,0 +1,117 @@
+{
+  "source": "Paspoort inrichting 20261005 Rotterdam-inrichting-Wave-1-v3 (1).xlsx",
+  "sections": [
+    {
+      "title": "Wegvakonderdeel (Sem.Rel)",
+      "rows": [
+        [
+          "Nummer",
+          "Objecttype",
+          "verkeersfunctie",
+          "straatligging",
+          "wegtype"
+        ]
+      ],
+      "remarks": {},
+      "repeater": true,
+      "repeat": 3,
+      "filters": [
+        "Beheerzone"
+      ]
+    },
+    {
+      "title": "Constructielagen (Sem.Rel)",
+      "rows": [
+        [
+          "Laagnummer",
+          "Constructielaag soort",
+          "Materiaal",
+          "aanlegjaar",
+          "laagdikte"
+        ]
+      ],
+      "remarks": {},
+      "repeater": true,
+      "repeat": 3,
+      "filters": [
+        "Verharding"
+      ]
+    },
+    {
+      "title": "Wegvak informatie (Sem.Rel)",
+      "rows": [
+        [
+          "Nummer",
+          "Gebruiksfunctie",
+          "Aanlegjaar",
+          "wegvak van",
+          "wegvak tot"
+        ]
+      ],
+      "remarks": {},
+      "filters": [
+        "Verharding"
+      ]
+    },
+    {
+      "title": "Wegvakonderdeel (Sem.Rel)",
+      "rows": [
+        [
+          "Nummer",
+          "Objecttype",
+          "verkeersfunctie",
+          "straatligging",
+          "wegtype"
+        ]
+      ],
+      "remarks": {},
+      "filters": [
+        "Constructie",
+        "Blok",
+        "Weginrichtingsobject",
+        "Verkeerskundige zone",
+        "Markering"
+      ]
+    },
+    {
+      "title": "Drager informatie (Sem. rel)",
+      "rows": [
+        [
+          "Volgnummer",
+          "Objectype",
+          "Plaatsingsjaar",
+          "Aantal borden aan drager***"
+        ]
+      ],
+      "remarks": {
+        "0": "***Dit is geen veld in de aangeleverde data. Kunnen jullie dit berekenen in iAsset zelf?"
+      },
+      "filters": [
+        "Bord",
+        "Informatiebord"
+      ]
+    },
+    {
+      "title": "Borden aan drager",
+      "rows": [
+        [
+          "Volgnummer",
+          "Objectype",
+          "Bordcode",
+          "Bord toepassing"
+        ]
+      ],
+      "remarks": {},
+      "repeater": true,
+      "repeat": 3,
+      "filters": [
+        "Straatmeubilair",
+        "Paal",
+        "Hek",
+        "Muur",
+        "Constructieonderdeel",
+        "Paalconstructie"
+      ]
+    }
+  ]
+}
