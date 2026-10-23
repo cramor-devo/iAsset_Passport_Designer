@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+- Release workflow: publishing a GitHub release builds the exe on `windows-latest` (after ruff and pytest) and attaches
+  the exe and its SHA256 file to the release; can be re-run manually for a tag.
+- Copilot cloud agent environment (`copilot-setup-steps.yml`): Ubuntu with Python, Qt system libraries and the dev
+  dependencies in `.venv`.
 - Application icon (iAsset Syncer style with a passport), used for windows, the taskbar and the exe
   (`passport_designer/assets`, regenerate ICO/PNG with `python tools/generate_app_icon.py`).
 
