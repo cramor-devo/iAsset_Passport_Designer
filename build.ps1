@@ -5,6 +5,8 @@ Set-Location $PSScriptRoot
 python -m pip install -r requirements-dev.txt
 python -m PyInstaller --noconfirm --clean --onefile --windowed `
     --name iAsset_Passport_Designer `
+    --icon "passport_designer\assets\iasset-passport-designer.ico" `
     --add-data "passport_designer\data;passport_designer\data" `
+    --add-data "passport_designer\assets;passport_designer\assets" `
     main.py
 Write-Host "Klaar / Done: $PSScriptRoot\dist\iAsset_Passport_Designer.exe"

@@ -11,7 +11,7 @@ from zipfile import BadZipFile
 from openpyxl import load_workbook
 from openpyxl.utils.exceptions import InvalidFileException
 
-from .models import ObjectType, SpecModel, norm
+from .models import DEFAULT_FILTER_COLUMNS, ObjectType, SpecModel, norm
 
 log = logging.getLogger(__name__)
 
@@ -36,24 +36,32 @@ def _find_sheet(names: list[str], wanted: str) -> str | None:
     return None
 
 
-def _rows_with_header(rows: Iterator[tuple[object, ...]], required: tuple[str, ...]) -> tuple[dict[str, int], list]:
-    """Zoek de kopregel (eerste regels van het blad) en geef kolomindex per kopnaam + de resterende rijen.
-    Find the header row (first rows of the sheet) and return column index per header + the remaining rows."""
+def _rows_with_header(
+    rows: Iterator[tuple[object, ...]], required: tuple[str, ...], any_of: tuple[str, ...] = (),
+) -> tuple[dict[str, int], dict[str, str], list]:
+    """Zoek de kopregel (eerste regels van het blad) en geef kolomindex per kopnaam, de oorspronkelijke kopnamen en
+    de resterende rijen. ``any_of``: minstens één van deze kolommen moet bestaan.
+    Find the header row (first rows of the sheet) and return column index per header, the original header names
+    and the remaining rows. ``any_of``: at least one of these columns must exist."""
     for _, row in zip(range(HEADER_SCAN_ROWS), rows, strict=False):
         headers: dict[str, int] = {}
+        labels: dict[str, str] = {}
         for index, value in enumerate(row):
-            key = norm(_text(value))
+            label = _text(value)
+            key = norm(label)
             if key and key not in headers:  # dubbele kopnamen (GUID, URI): eerste wint / duplicates: first wins
                 headers[key] = index
-        if all(name in headers for name in required):
-            return headers, list(rows)
-    raise SpecError(f"Header row with columns {', '.join(required)} not found.")
+                labels[key] = label
+        if all(name in headers for name in required) and (not any_of or any(n in headers for n in any_of)):
+            return headers, labels, list(rows)
+    wanted = [*required, " / ".join(any_of)] if any_of else list(required)
+    raise SpecError(f"Header row with columns {', '.join(wanted)} not found.")
 
 
 def read_spec(path: str | Path, progress: ProgressCallback | None = None) -> SpecModel:
-    """Lees een specificatiebestand. Verwacht de tabbladen 'Objecttypen' (Objecttype, Filter) en
-    'Attributen' (Objecttype, Attribuut).
-    Read a specification file. Expects the sheets 'Objecttypen' (Objecttype, Filter) and
+    """Lees een specificatiebestand. Verwacht de tabbladen 'Objecttypen' (Objecttype + Filter, Zoekfilter of Fase)
+    en 'Attributen' (Objecttype, Attribuut).
+    Read a specification file. Expects the sheets 'Objecttypen' (Objecttype + Filter, Zoekfilter or Fase) and
     'Attributen' (Objecttype, Attribuut)."""
     file_path = Path(path)
     try:
@@ -80,28 +88,36 @@ def read_spec(path: str | Path, progress: ProgressCallback | None = None) -> Spe
 
 
 def _read_object_types(rows: Iterator[tuple[object, ...]], spec: SpecModel) -> None:
-    headers, body = _rows_with_header(rows, ("objecttype", "filter"))
+    headers, labels, body = _rows_with_header(rows, ("objecttype",), DEFAULT_FILTER_COLUMNS)
+    # Standaard-filterkolom: Filter, anders Zoekfilter, anders Fase (Wave 2); in de UI is elke kolom te kiezen.
+    # Default filter column: Filter, else Zoekfilter, else Fase (Wave 2); any column can be chosen in the UI.
+    filter_key = next(c for c in DEFAULT_FILTER_COLUMNS if c in headers)
+    columns = [key for key in headers if key != "objecttype"]
+    spec.columns = [labels[key] for key in columns]
 
     def get(row: tuple[object, ...], name: str) -> str:
         index = headers.get(name)
         return _text(row[index]) if index is not None and index < len(row) else ""
 
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[str, tuple[tuple[str, str], ...]]] = set()
     for row in body:
-        name, filter_name = get(row, "objecttype"), get(row, "filter")
-        if not name or not filter_name or (name, filter_name) in seen:
+        name = get(row, "objecttype")
+        values = tuple((key, value) for key in columns if (value := get(row, key)))
+        if not name or not values or (name, values) in seen:
             continue
-        seen.add((name, filter_name))
+        seen.add((name, values))
         # Wave 1 heeft 'Groep'; Wave 2 niet, daar vervangt 'Fase' (bijv. Put, Stuw) de beheergroep.
         # Wave 1 has 'Groep'; Wave 2 does not, there 'Fase' (e.g. Put, Stuw) stands in for the management group.
         group = get(row, "groep") if "groep" in headers else get(row, "fase")
         spec.object_types.append(
-            ObjectType(name, filter_name, group, get(row, "fase"), get(row, "geometrietype")),
+            ObjectType(
+                name, get(row, filter_key), group, get(row, "fase"), get(row, "geometrietype"), values,
+            ),
         )
 
 
 def _read_attributes(rows: Iterator[tuple[object, ...]], spec: SpecModel) -> None:
-    headers, body = _rows_with_header(rows, ("objecttype", "attribuut"))
+    headers, _, body = _rows_with_header(rows, ("objecttype", "attribuut"))
     flag_index = next((headers[c] for c in FLAG_COLUMNS if c in headers), None)
     type_index, attr_index = headers["objecttype"], headers["attribuut"]
     seen: dict[str, set[str]] = {}

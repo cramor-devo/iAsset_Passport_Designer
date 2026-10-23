@@ -55,6 +55,7 @@ from ..settings import AppSettings, data_dir
 from ..spec_reader import SpecError, read_spec
 from .mockup import PassportMockup
 from .settings_dialog import PayloadSettingsDialog
+from .sheet_preview import SheetPreview
 from .theme import PALETTES, app_stylesheet
 from .workers import Job, run_job
 
@@ -107,6 +108,12 @@ class MainWindow(QMainWindow):
 
         left = QWidget()
         left_layout = QVBoxLayout(left)
+        self.column_label = QLabel()
+        self.column_combo = QComboBox()
+        self.column_label.setBuddy(self.column_combo)
+        self.column_combo.currentIndexChanged.connect(self._on_filter_column_changed)
+        left_layout.addWidget(self.column_label)
+        left_layout.addWidget(self.column_combo)
         self.filter_label = QLabel()
         self.filter_list = QListWidget()
         self.filter_label.setBuddy(self.filter_list)
@@ -127,6 +134,8 @@ class MainWindow(QMainWindow):
         self.views = QTabWidget()
         self.mockup = PassportMockup()
         self.views.addTab(self.mockup, "")
+        self.sheet_preview = SheetPreview()
+        self.views.addTab(self.sheet_preview, "")
         self.views.addTab(self._build_payload_tab(), "")
         self.validation_list = QListWidget()
         self.validation_list.setWordWrap(True)
@@ -235,6 +244,7 @@ class MainWindow(QMainWindow):
         self.add_action = self._action("action.add", self.add_spec, "Ctrl+Shift+O")
         self.ids_action = self._action("action.load_ids", self.load_ids, "Ctrl+I")
         self.excel_action = self._action("action.export_excel", self.export_excel, "Ctrl+E")
+        self.excel_types_action = self._action("action.export_excel_types", self.export_excel_per_type, "Ctrl+Shift+E")
         self.png_action = self._action("action.export_png", self.export_png, "Ctrl+P")
         self.payload_action = self._action("action.save_payload", self.save_payload, QKeySequence.StandardKey.Save)
         self.all_payload_action = self._action("action.save_all_payloads", self.save_all_payloads, "Ctrl+Shift+S")
@@ -242,7 +252,9 @@ class MainWindow(QMainWindow):
         for action in (self.open_action, self.add_action, self.ids_action):
             self.file_menu.addAction(action)
         self.file_menu.addSeparator()
-        for action in (self.excel_action, self.png_action, self.payload_action, self.all_payload_action):
+        for action in (
+            self.excel_action, self.excel_types_action, self.png_action, self.payload_action, self.all_payload_action,
+        ):
             self.file_menu.addAction(action)
         self.file_menu.addSeparator()
         self.file_menu.addAction(self.quit_action)
@@ -300,11 +312,15 @@ class MainWindow(QMainWindow):
         self.profile_menu.setTitle(tr("menu.profile"))
         for name, action in self._theme_actions.items():
             action.setText(tr(f"theme.{name}"))
+        self.column_label.setText(tr("panel.filter_column"))
+        self.column_combo.setToolTip(tr("panel.filter_column_tip"))
         self.filter_label.setText(tr("panel.filters"))
         self.type_label.setText(tr("panel.object_type"))
+        if self.type_combo.count():
+            self.type_combo.setItemText(0, tr("panel.all_types"))
         self.flagged_check.setText(tr("panel.only_flagged"))
         self.flagged_check.setToolTip(tr("panel.only_flagged_tip"))
-        for index, key in enumerate(("tab.mockup", "tab.payload", "tab.validation", "tab.merge")):
+        for index, key in enumerate(("tab.mockup", "tab.sheet", "tab.payload", "tab.validation", "tab.merge")):
             self.views.setTabText(index, tr(key))
         self.threshold_label.setText(tr("merge.threshold"))
         self.same_group_check.setText(tr("merge.same_group"))
@@ -398,6 +414,10 @@ class MainWindow(QMainWindow):
             self.applied_merges.clear()
         else:
             self.spec.merge(loaded)
+        self.spec.filter_column = self.spec.resolve_filter_column(
+            self.spec.filter_column or self.settings.string("design/filter_column", ""),
+        )
+        self._populate_columns()
         self._rebuild_designs()
         self.statusBar().showMessage(
             tr("status.loaded", files=file_count, filters=len(self.tabs), types=len(self.spec.object_types)),
@@ -424,6 +444,31 @@ class MainWindow(QMainWindow):
         self._refresh_views()
 
     # --- ontwerp en weergave / design and display ------------------------------------------------------------
+
+    def _populate_columns(self) -> None:
+        """Vul de keuzelijst met kolommen van het tabblad 'Objecttypen'. / Fill the 'Objecttypen' column picker."""
+        self.column_combo.blockSignals(True)
+        self.column_combo.clear()
+        if self.spec is not None:
+            self.column_combo.addItems(self.spec.columns)
+            self.column_combo.setCurrentIndex(max(self.column_combo.findText(self.spec.filter_column), 0))
+        self.column_combo.blockSignals(False)
+
+    def set_filter_column(self, column: str) -> None:
+        """Groepeer de paspoorten op een andere kolom (bijv. Fase); samenvoegingen vervallen.
+        Group the passports by another column (e.g. Fase); applied merges are dropped."""
+        if self.spec is None or column == self.spec.filter_column or column not in self.spec.columns:
+            return
+        self.spec.filter_column = column
+        self.settings.set("design/filter_column", column)
+        self.applied_merges.clear()
+        self._populate_columns()
+        self._rebuild_designs()
+        files, types = len(self.spec.sources), len(self.spec.object_types)
+        self.statusBar().showMessage(tr("status.loaded", files=files, filters=len(self.tabs), types=types))
+
+    def _on_filter_column_changed(self, _index: int) -> None:
+        self.set_filter_column(self.column_combo.currentText())
 
     def _on_flagged_toggled(self, checked: bool) -> None:
         self.settings.set("design/only_flagged", checked)
@@ -467,9 +512,26 @@ class MainWindow(QMainWindow):
         self.type_combo.blockSignals(True)
         self.type_combo.clear()
         if tab:
-            self.type_combo.addItems([o.name for o in tab.object_types])
+            # Eerst het hele paspoort (zoals de export), daarna per objecttype. / Whole passport first, then per type.
+            self.type_combo.addItem(tr("panel.all_types"), "")
+            for object_type in tab.object_types:
+                self.type_combo.addItem(object_type.name, object_type.name)
         self.type_combo.blockSignals(False)
         self._refresh_views()
+
+    def selected_object_type(self) -> str:
+        """Gekozen voorbeeld-objecttype ("" = alle objecttypen). / Chosen preview object type ("" = all)."""
+        data = self.type_combo.currentData()
+        return data if isinstance(data, str) else ""
+
+    def preview_tab(self) -> PassportTab | None:
+        """Het getoonde paspoort: voor één objecttype zonder de velden die daar niet voor gelden.
+        The passport shown: for one object type without the fields that do not apply to it."""
+        tab = self.current_tab()
+        object_type = self.selected_object_type()
+        if tab is None or not object_type or self.engine is None:
+            return tab
+        return self.engine.build_single(tab, object_type)
 
     # --- samenvoegen / merging -------------------------------------------------------------------------------
 
@@ -565,7 +627,9 @@ class MainWindow(QMainWindow):
 
     def _refresh_views(self) -> None:
         tab = self.current_tab()
-        self.mockup.show_tab(tab, self.type_combo.currentText(), PALETTES[self.theme_name])
+        shown = self.preview_tab()
+        self.mockup.show_tab(shown, self.selected_object_type(), PALETTES[self.theme_name])
+        self.sheet_preview.show_tab(shown)
         self.payload = build_tab_payload(tab, self.ids, self.options) if tab else None
         self._render_payload_text()
         self.validation_list.clear()
@@ -630,6 +694,24 @@ class MainWindow(QMainWindow):
             return
         try:
             export_workbook(self.tabs, path)
+        except (OSError, ValueError) as exc:
+            log.exception("Excel export failed")
+            self._warn(tr("error.write", detail=str(exc)))
+            return
+        self.statusBar().showMessage(tr("status.saved", path=path))
+
+    def export_excel_per_type(self) -> None:
+        """Eén tabblad per objecttype, zonder de velden die niet voor dat objecttype gelden.
+        One sheet per object type, without the fields that do not apply to that object type."""
+        if not self._require_tabs() or self.engine is None:
+            return
+        path = self._save_path("dialog.save_excel", "Paspoortinrichting per objecttype.xlsx", "dialog.filter_xlsx")
+        if not path:
+            return
+        engine = self.engine
+        pairs = [(engine.build_single(tab, o.name), o.name) for tab in self.tabs for o in tab.object_types]
+        try:
+            export_workbook([tab for tab, _ in pairs], path, [name for _, name in pairs])
         except (OSError, ValueError) as exc:
             log.exception("Excel export failed")
             self._warn(tr("error.write", detail=str(exc)))
