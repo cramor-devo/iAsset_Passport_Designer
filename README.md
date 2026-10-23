@@ -45,21 +45,29 @@ The log file is stored at `%LOCALAPPDATA%\iAssetPassportDesigner\passport_design
 
 1. Choose **File → Open specification(s)…** and select one or more xlsx files. Use **Add specification…** to add
    another file to what is already loaded, for example Wave 2 on top of Wave 1. Each file needs an `Objecttypen` sheet
-   (columns Objecttype, Filter, Groep/Fase) and an `Attributen` sheet (columns Objecttype, Attribuut).
-2. Pick a filter and a preview object type on the left. The **Mockup** tab shows the passport as it will look in
-   iAsset; switch between a dark and a light theme under **View → Mockup theme**. Fields that do not apply to the
-   selected object type are greyed out; hover over them to see which object types or sub-themes they belong to.
-3. The **Merge suggestions** tab proposes filters that could share a single passport, based on the same management
+   (column Objecttype plus Filter, Zoekfilter or Fase; optionally Groep) and an `Attributen` sheet (columns
+   Objecttype, Attribuut).
+2. Under **Filter column (Objecttypen)** at the top left, choose which column of the `Objecttypen` sheet groups the
+   object types into passports, for example `Filter`/`Zoekfilter` in Wave 1 or `Fase` in Wave 2. By default the
+   designer uses Filter, then Zoekfilter, then Fase; your choice is remembered. Changing it undoes applied merges.
+3. Pick a filter and a preview object type on the left. **All object types** shows the whole passport; when you pick
+   a single object type, fields that do not apply to it are **hidden**. The **Mockup** tab shows the passport as it
+   will look in iAsset; switch between a dark and a light theme under **View → Mockup theme**. The **Design sheet** tab
+   shows exactly what the Excel export writes, laid out like the passport design workbook: the title, the object
+   types below it, grey (and light blue for Sem.Rel) section headings, an empty column and the `Opmerkingen`
+   reference list for fields that do not apply to every object type.
+4. The **Merge suggestions** tab proposes filters that could share a single passport, based on the same management
    group and similar attributes (Jaccard similarity). Fields that do not apply to every object type get a footnote:
    these are the fields you switch on or off per sub-theme in iAsset. Use **Preview merged passport** to inspect a
    suggestion, **Apply merge** to merge the filters, and **Export merge matrix…** to save a field × object type matrix.
-4. Choose **File → Load field ID file…** to load an export of `GET /diverse-fields` (JSON, CSV or xlsx with the columns
+5. Choose **File → Load field ID file…** to load an export of `GET /diverse-fields` (JSON, CSV or xlsx with the columns
    label/name and id). Without field IDs, `field_id` is set to `null` and the **Validation** tab reports an error.
-5. On the **API payload** tab, copy the payload or save it to a file. Paste the JSON into iAsset Syncer → API Explorer
+6. On the **API payload** tab, copy the payload or save it to a file. Paste the JSON into iAsset Syncer → API Explorer
    → V2 → `POST /passport-tabs`. Syncer sends it as multipart form data (`fields[0][children][1][label]`); the
    **Form fields (Laravel)** format shows the same fields in that form.
-6. **File → Export Excel design…** writes one sheet per passport. **File → Export mockup as PNG…** saves the mockup as
-   an image.
+7. **File → Export Excel design…** writes one sheet per passport. **File → Export Excel design per object type…**
+   writes one sheet per object type without the fields that do not apply to it. **File → Export mockup as PNG…**
+   saves the mockup (as shown in the preview) as an image.
 
 ## Design profiles
 
@@ -113,6 +121,10 @@ ruff check .
 pyright
 pytest
 ```
+
+Every push and pull request runs these checks on GitHub Actions. When a new version (`__version__` in
+`passport_designer/__init__.py`) reaches `main`, the workflow builds the Windows executable and publishes it as release
+`v<version>` automatically.
 
 See [CHANGELOG.md](CHANGELOG.md) for the version history.
 
