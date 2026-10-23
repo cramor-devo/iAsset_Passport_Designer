@@ -31,6 +31,14 @@ powershell -ExecutionPolicy Bypass -File build.ps1
 
 Het resultaat komt in `dist\iAsset_Passport_Designer.exe`.
 
+### Een release maken
+
+Lokaal bouwen is niet nodig voor een release. Zet `__version__` in `passport_designer/__init__.py`, werk
+`CHANGELOG.md` bij en publiceer daarna een GitHub-release met tag `vX.Y.Z` (gelijk aan de versie). De workflow
+**Release** draait de tests op `windows-latest`, bouwt de exe met `build.ps1` en hangt `iAsset_Passport_Designer.exe`
+en `iAsset_Passport_Designer.exe.sha256` aan de release. Wil je een bestaande release opnieuw bouwen, start de workflow
+dan handmatig (**Actions → Release → Run workflow**) met de tag van die release.
+
 ## Installeren vanuit de broncode
 
 ```text

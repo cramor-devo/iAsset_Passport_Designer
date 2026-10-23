@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+- Release workflow: publishing a GitHub release builds the exe on `windows-latest` (after ruff and pytest) and attaches
+  the exe and its SHA256 file to the release; can be re-run manually for a tag.
+- Copilot cloud agent environment (`copilot-setup-steps.yml`): Ubuntu with Python, Qt system libraries and the dev
+  dependencies in `.venv`.
+
 ## 0.2.0
 - Single-file Windows executable (`iAsset_Passport_Designer.exe`, PyInstaller) and `build.ps1`.
 - Design profile `rotterdam_v3` (default), modelled on the manually tuned Wave-1-v3 workbook: title/`Objecttypes` header,
