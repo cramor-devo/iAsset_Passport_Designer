@@ -18,6 +18,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "action.add": {"en": "&Add specification…", "nl": "Specificatie &toevoegen…"},
     "action.load_ids": {"en": "Load field &ID file…", "nl": "Veld-&ID-bestand laden…"},
     "action.export_excel": {"en": "Export &Excel design…", "nl": "&Excel-ontwerp exporteren…"},
+    "action.export_excel_types": {
+        "en": "Export Excel design per object &type…",
+        "nl": "Excel-ontwerp per object&type exporteren…",
+    },
     "action.export_png": {"en": "Export mockup as &PNG…", "nl": "Mockup als &PNG exporteren…"},
     "action.save_payload": {"en": "&Save payload…", "nl": "Payload op&slaan…"},
     "action.save_all_payloads": {"en": "Save &all payloads…", "nl": "&Alle payloads opslaan…"},
@@ -27,6 +31,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "action.copy": {"en": "Copy to clipboard", "nl": "Kopieer naar klembord"},
     "panel.filters": {"en": "Filters (passport tabs)", "nl": "Filters (paspoorttabbladen)"},
     "panel.object_type": {"en": "Preview object type:", "nl": "Voorbeeld-objecttype:"},
+    "panel.all_types": {"en": "All object types", "nl": "Alle objecttypen"},
+    "panel.filter_column": {"en": "Filter column (Objecttypen):", "nl": "Filterkolom (Objecttypen):"},
+    "panel.filter_column_tip": {
+        "en": "Column of the 'Objecttypen' sheet that groups object types into passports (e.g. Filter, Zoekfilter, "
+        "Fase). Changing it undoes applied merges.",
+        "nl": "Kolom van het tabblad 'Objecttypen' die objecttypen in paspoorten groepeert (bijv. Filter, Zoekfilter, "
+        "Fase). Wijzigen maakt toegepaste samenvoegingen ongedaan.",
+    },
     "panel.only_flagged": {
         "en": "Only attributes marked for the passport",
         "nl": "Alleen attributen die in het paspoort getoond worden",
@@ -36,6 +48,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "nl": "Slaat attributen over die op 'Nee' staan bij 'In paspoort tonen' / 'Opnemen'.",
     },
     "tab.mockup": {"en": "Mockup", "nl": "Mockup"},
+    "tab.sheet": {"en": "Design sheet", "nl": "Ontwerpblad"},
     "tab.payload": {"en": "API payload", "nl": "API-payload"},
     "tab.validation": {"en": "Validation", "nl": "Validatie"},
     "payload.format": {"en": "Format:", "nl": "Formaat:"},
@@ -55,10 +68,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "mock.log": {"en": "Log", "nl": "Logboek"},
     "mock.notes": {"en": "Notes / Exceptions", "nl": "Notities / Uitzonderingen"},
     "mock.applies_to": {"en": "Applies to: {types}", "nl": "Geldt voor: {types}"},
-    "mock.not_for_type": {
-        "en": "Not applicable to {type}. Applies to: {types}",
-        "nl": "Niet van toepassing op {type}. Geldt voor: {types}",
-    },
     "mock.edit": {"en": "Edit", "nl": "Bewerken"},
     "mock.delete": {"en": "Delete", "nl": "Verwijderen"},
     "mock.print": {"en": "Print", "nl": "Afdrukken"},
