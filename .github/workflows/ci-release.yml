@@ -59,6 +59,8 @@ jobs:
       - name: Release notes
         if: steps.version.outputs.exists == 'false'
         shell: bash
+        env:
+          PYTHONIOENCODING: utf-8
         run: |
           python - "${{ steps.version.outputs.tag }}" > notes.md <<'EOF'
           import sys
