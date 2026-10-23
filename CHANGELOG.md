@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+- Application icon (iAsset Syncer style with a passport), used for windows, the taskbar and the exe
+  (`passport_designer/assets`, regenerate ICO/PNG with `python tools/generate_app_icon.py`).
+
 ## 0.3.0
 - Filter column selector: group/merge passports by any column of the `Objecttypen` sheet (e.g. `Fase` in Wave 2,
   `Filter`/`Zoekfilter` before). Default: Filter → Zoekfilter → Fase; the choice is remembered. A sheet only needs

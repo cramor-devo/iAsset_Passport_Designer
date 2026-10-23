@@ -115,3 +115,9 @@ def test_single_object_type_hides_unassigned_fields(window):
     assert sheet.text_at(1, 1) == "Bord" and sheet.text_at(2, 1) == "Objecttypes: Verkeersbord"
     window.type_combo.setCurrentText("APV-bord")
     assert "APV-verordening" in sheet_texts(window)  # geen voetnoot meer / no footnote any more
+
+
+def test_application_icon_renders(app):
+    from passport_designer.ui.branding import application_icon
+
+    assert not application_icon().pixmap(32, 32).isNull()
