@@ -46,25 +46,32 @@ Het logbestand staat in `%LOCALAPPDATA%\iAssetPassportDesigner\passport_designer
 
 1. Kies **Bestand → Specificatie(s) openen…** en selecteer een of meer xlsx-bestanden. Met **Specificatie
    toevoegen…** voeg je een bestand toe aan wat al geladen is, bijvoorbeeld Wave 2 bovenop Wave 1. Elk bestand heeft
-   een tabblad `Objecttypen` nodig (kolommen Objecttype, Filter, Groep/Fase) en een tabblad `Attributen` (kolommen
-   Objecttype, Attribuut).
-2. Kies links een filter en een voorbeeld-objecttype. Het tabblad **Mockup** laat zien hoe het paspoort er in iAsset
-   uitziet. Via **Beeld → Mockup-thema** kies je een donker of licht thema. Velden die niet gelden voor het gekozen
-   objecttype worden grijs weergegeven; beweeg met de muis over zo'n veld om te zien voor welke objecttypen of
-   subthema's het wel geldt.
-3. Het tabblad **Samenvoegadvies** stelt filters voor die samen één paspoort kunnen gebruiken. Het advies is gebaseerd
+   een tabblad `Objecttypen` nodig (kolom Objecttype plus Filter, Zoekfilter of Fase; eventueel Groep) en een tabblad
+   `Attributen` (kolommen Objecttype, Attribuut).
+2. Kies linksboven bij **Filterkolom (Objecttypen)** op welke kolom van het tabblad `Objecttypen` de objecttypen in
+   paspoorten worden gegroepeerd, bijvoorbeeld `Filter`/`Zoekfilter` in Wave 1 of `Fase` in Wave 2. Standaard gebruikt
+   de designer Filter, dan Zoekfilter, dan Fase; je keuze wordt onthouden. Wijzigen maakt toegepaste samenvoegingen
+   ongedaan.
+3. Kies links een filter en een voorbeeld-objecttype. **Alle objecttypen** toont het hele paspoort; kies je één
+   objecttype, dan worden velden die daar niet voor gelden **verborgen**. Het tabblad **Mockup** laat zien hoe het
+   paspoort er in iAsset uitziet. Via **Beeld → Mockup-thema** kies je een donker of licht thema. Het tabblad
+   **Ontwerpblad** toont precies wat de Excel-export schrijft, ingedeeld zoals het paspoortinrichting-bestand: de
+   titel, de objecttypen eronder, grijze (en lichtblauwe voor Sem.Rel) sectiekoppen, een lege kolom en de
+   verwijzingslijst `Opmerkingen` voor velden die niet voor alle objecttypen gelden.
+4. Het tabblad **Samenvoegadvies** stelt filters voor die samen één paspoort kunnen gebruiken. Het advies is gebaseerd
    op dezelfde beheergroep en vergelijkbare attributen (Jaccard-gelijkenis). Velden die niet voor alle objecttypen
    gelden, krijgen een voetnoot: dit zijn de velden die je in iAsset per subthema aan- of uitzet. Met **Voorbeeld
    samengevoegd paspoort** bekijk je een voorstel, met **Samenvoegen toepassen** voeg je de filters samen en met
    **Samenvoegmatrix exporteren…** sla je een matrix van velden × objecttypen op.
-4. Kies **Bestand → Veld-ID-bestand laden…** om een export van `GET /diverse-fields` te laden (JSON, CSV of xlsx met
+5. Kies **Bestand → Veld-ID-bestand laden…** om een export van `GET /diverse-fields` te laden (JSON, CSV of xlsx met
    de kolommen label/name en id). Zonder veld-ID's krijgt `field_id` de waarde `null` en meldt het tabblad
    **Validatie** een fout.
-5. Op het tabblad **API-payload** kopieer je de payload of sla je hem op. Plak de JSON in iAsset Syncer → API Explorer
+6. Op het tabblad **API-payload** kopieer je de payload of sla je hem op. Plak de JSON in iAsset Syncer → API Explorer
    → V2 → `POST /passport-tabs`. Syncer verstuurt de gegevens als multipart-formulier
    (`fields[0][children][1][label]`); het formaat **Formuliervelden (Laravel)** toont dezelfde velden in die vorm.
-6. **Bestand → Excel-ontwerp exporteren…** maakt één tabblad per paspoort. **Bestand → Mockup als PNG exporteren…**
-   slaat de mockup op als afbeelding.
+7. **Bestand → Excel-ontwerp exporteren…** maakt één tabblad per paspoort. **Bestand → Excel-ontwerp per objecttype
+   exporteren…** maakt één tabblad per objecttype, zonder de velden die daar niet voor gelden. **Bestand → Mockup als
+   PNG exporteren…** slaat de mockup (zoals in het voorbeeld) op als afbeelding.
 
 ## Ontwerpprofielen
 
@@ -118,6 +125,10 @@ ruff check .
 pyright
 pytest
 ```
+
+Elke push en pull request draait deze controles op GitHub Actions. Zodra een nieuwe versie (`__version__` in
+`passport_designer/__init__.py`) op `main` staat, bouwt de workflow het Windows-programma en publiceert het automatisch
+als release `v<versie>`.
 
 Zie [CHANGELOG.md](CHANGELOG.md) voor de versiegeschiedenis.
 

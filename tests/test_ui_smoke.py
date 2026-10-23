@@ -35,7 +35,8 @@ def window(app, wave1_spec, tmp_path):
 
 def test_loading_fills_filters_and_views(window):
     assert window.filter_list.count() == 2
-    assert window.type_combo.count() == 2
+    assert window.type_combo.count() == 3  # "All object types" + 2 object types
+    assert window.type_combo.itemText(0) == "All object types"
     assert "POST /passport-tabs" in window.payload_text.toPlainText()
     assert window.validation_list.count() >= 1
 
@@ -79,5 +80,38 @@ def test_every_translation_has_both_languages():
 def test_filter_and_object_type_switch_updates_payload(window):
     window.filter_list.setCurrentRow(1)
     assert "Verharding" in window.payload_text.toPlainText()
-    assert window.type_combo.currentText() == "Asfaltverharding"
+    assert window.type_combo.currentText() == "All object types"
+    assert window.type_combo.itemText(1) == "Asfaltverharding"
     translator.set_language("en")
+
+
+def test_filter_column_selector_regroups_passports(window, wave2_file):
+    from passport_designer.spec_reader import read_spec
+
+    window._on_loaded(read_spec(wave2_file), 1, True)
+    assert [window.column_combo.itemText(i) for i in range(window.column_combo.count())][:3] == [
+        "Organisatie", "Filter", "Systeem",
+    ]
+    assert window.column_combo.currentText() == "Filter"
+    assert [t.name for t in window.tabs] == ["RD-Obsurv", "RD-Ultimo"]
+    window.column_combo.setCurrentText("Fase")
+    assert [t.name for t in window.tabs] == ["Put", "Stuw"]
+    assert window.settings.string("design/filter_column", "") == "Fase"
+    window._on_loaded(read_spec(wave2_file), 1, True)  # keuze blijft bewaard / choice is remembered
+    assert [t.name for t in window.tabs] == ["Put", "Stuw"]
+
+
+def sheet_texts(window) -> set[str]:
+    sheet = window.sheet_preview
+    return {sheet.text_at(r, c) for r in range(1, sheet.rowCount() + 1) for c in range(1, sheet.columnCount() + 1)}
+
+
+def test_single_object_type_hides_unassigned_fields(window):
+    window.filter_list.setCurrentRow(0)  # Bord: APV-bord + Verkeersbord
+    sheet = window.sheet_preview
+    assert any(t.startswith("APV-verordening (") for t in sheet_texts(window))
+    window.type_combo.setCurrentText("Verkeersbord")
+    assert not any(t.startswith("APV-verordening") for t in sheet_texts(window))
+    assert sheet.text_at(1, 1) == "Bord" and sheet.text_at(2, 1) == "Objecttypes: Verkeersbord"
+    window.type_combo.setCurrentText("APV-bord")
+    assert "APV-verordening" in sheet_texts(window)  # geen voetnoot meer / no footnote any more

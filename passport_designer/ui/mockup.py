@@ -32,7 +32,8 @@ BASIS_SECTION = "Basis"
 
 
 class PassportMockup(QFrame):
-    """Toont een PassportTab voor één gekozen objecttype. / Shows a PassportTab for one chosen object type."""
+    """Toont een PassportTab, desgewenst voor één objecttype (velden die daar niet voor gelden zijn verborgen).
+    Shows a PassportTab, optionally for one object type (fields that do not apply to it are hidden)."""
 
     def __init__(self, scrollable: bool = True, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -170,7 +171,12 @@ class PassportMockup(QFrame):
                     layout.addWidget(note)
             return wrapper
         for index, row in enumerate(section.rows):
-            layout.addWidget(self._build_row(tab, section, row))
+            # Velden die niet voor het gekozen objecttype gelden worden verborgen.
+            # Fields that do not apply to the chosen object type are hidden.
+            visible = [c for c in row if not self._object_type or tab.applicable(c.label, self._object_type)]
+            if row and not visible:
+                continue
+            layout.addWidget(self._build_row(tab, section, visible))
             remark = section.margin.get(index)
             if remark:
                 note = QLabel(remark)
@@ -192,28 +198,19 @@ class PassportMockup(QFrame):
         grid.setVerticalSpacing(4)
         for column, cell in enumerate(row):
             grid.setColumnStretch(column, 1)
-            applies = tab.applicable(cell.label, self._object_type) if self._object_type else True
-            colour = p.text if applies else p.muted
-            style = "normal" if applies else "italic"
             head = QLabel(cell.label)
             head.setAlignment(Qt.AlignmentFlag.AlignCenter)
             head.setStyleSheet(
-                f"background: {p.header_band}; color: {colour}; font-weight: 700; font-size: 8pt; "
-                f"font-style: {style}; padding: 7px 4px;",
+                f"background: {p.header_band}; color: {p.text}; font-weight: 700; font-size: 8pt; padding: 7px 4px;",
             )
             head.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             value = QLabel(self._sample(section, cell))
             value.setMinimumHeight(24)
             value.setStyleSheet(
-                f"background: {p.input_bg if applies else 'transparent'}; color: {p.text}; border-radius: 5px; "
-                "padding: 2px 8px; font-size: 9pt;",
+                f"background: {p.input_bg}; color: {p.text}; border-radius: 5px; padding: 2px 8px; font-size: 9pt;",
             )
             if cell.footnote:
-                types = tab.footnotes.get(cell.footnote, [])
-                if applies:
-                    tip = tr("mock.applies_to", types=", ".join(types))
-                else:
-                    tip = tr("mock.not_for_type", type=self._object_type, types=", ".join(types))
+                tip = tr("mock.applies_to", types=", ".join(tab.footnotes.get(cell.footnote, [])))
                 head.setToolTip(tip)
                 value.setToolTip(tip)
             grid.addWidget(head, 0, column)
