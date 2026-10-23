@@ -60,10 +60,12 @@ jobs:
 
       # NL: Eerst de controles; bij een fout wordt er geen exe gepubliceerd.
       # EN: Checks first; if anything fails, no exe is published.
-      - name: Lint and test
-        run: |
-          python -m ruff check .
-          python -m pytest -q
+      #     Aparte stappen, zodat elke fout de job stopt. / Separate steps, so every failure stops the job.
+      - name: Lint
+        run: python -m ruff check .
+
+      - name: Test
+        run: python -m pytest -q
 
       - name: Build exe
         shell: pwsh
