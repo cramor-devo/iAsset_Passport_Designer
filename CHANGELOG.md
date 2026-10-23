@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0
+- Filter column selector: group/merge passports by any column of the `Objecttypen` sheet (e.g. `Fase` in Wave 2,
+  `Filter`/`Zoekfilter` before). Default: Filter → Zoekfilter → Fase; the choice is remembered. A sheet only needs
+  `Objecttype` plus one of these columns.
+- Preview per object type hides the fields that do not apply to it (instead of dimming them); *All object types* shows
+  the whole passport. The PNG export follows the preview.
+- New *Design sheet* tab: shows exactly what the Excel export writes (title, object types below, grey/blue headings,
+  empty column, `Opmerkingen` reference list for fields that do not apply to all object types).
+- *Export Excel design per object type…*: one sheet per object type without the fields that do not apply to it.
+- GitHub Actions: tests on every push/PR; on `main` a new version is built as Windows exe and released automatically.
+
 ## 0.2.0
 - Single-file Windows executable (`iAsset_Passport_Designer.exe`, PyInstaller) and `build.ps1`.
 - Design profile `rotterdam_v3` (default), modelled on the manually tuned Wave-1-v3 workbook: title/`Objecttypes` header,
