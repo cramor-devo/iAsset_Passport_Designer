@@ -114,6 +114,18 @@ class LayoutEngine:
         tab.notes = [f"({number}) Objecttype: {', '.join(names)}" for number, names in sorted(footnotes.items())]
         return tab
 
+    def build_single(self, tab: PassportTab, object_type: str) -> PassportTab:
+        """Het paspoort van ``tab`` zoals het voor één objecttype eruitziet: velden die niet voor dit objecttype
+        gelden vallen weg (geen voetnoten). Onbekend objecttype: ``tab`` zelf.
+        The passport of ``tab`` as it looks for one object type: fields that do not apply to it are left out
+        (no footnotes). Unknown object type: ``tab`` itself."""
+        types = [o for o in tab.object_types if o.name == object_type]
+        if not types:
+            return tab
+        single = self.build(tab.name, types[:1], source_filters=tab.merged_from or [tab.name])
+        single.merged_from = list(tab.merged_from)
+        return single
+
     # --- secties / sections ----------------------------------------------------------------------------------
 
     def _basis(self, filter_name: str, group: str) -> Section:

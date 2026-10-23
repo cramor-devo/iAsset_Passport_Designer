@@ -8,6 +8,10 @@ from enum import Enum
 
 from .profiles import DEFAULT_PROFILE, DesignProfile
 
+# Kolommen die standaard als filter dienen, in volgorde van voorkeur (Wave 1: Filter/Zoekfilter, Wave 2: Fase).
+# Columns used as filter by default, in order of preference (Wave 1: Filter/Zoekfilter, Wave 2: Fase).
+DEFAULT_FILTER_COLUMNS = ("filter", "zoekfilter", "fase")
+
 
 def norm(name: str) -> str:
     """Genormaliseerde sleutel voor vergelijken (hoofdletters, spaties, voetnootnummers negeren).
@@ -24,6 +28,14 @@ class ObjectType:
     group: str = ""
     phase: str = ""
     geometry: str = ""
+    # Alle kolommen van de rij (genormaliseerde kopnaam -> waarde), voor een andere filterkolom (bijv. Fase).
+    # All columns of the row (normalised header -> value), for choosing another filter column (e.g. Fase).
+    values: tuple[tuple[str, str], ...] = ()
+
+    def value(self, column: str) -> str:
+        """Waarde in een kolom van het tabblad 'Objecttypen'. / Value in a column of the 'Objecttypen' sheet."""
+        key = norm(column)
+        return next((v for k, v in self.values if k == key), "")
 
 
 @dataclass
@@ -36,21 +48,45 @@ class SpecModel:
     # Attributen die in de bron op "Nee" staan (In paspoort tonen / Opnemen), per objecttype, genormaliseerd.
     # Attributes marked "Nee" in the source (In paspoort tonen / Opnemen), per object type, normalised.
     excluded: dict[str, set[str]] = field(default_factory=dict)
+    # Kopnamen van het tabblad 'Objecttypen' (zonder 'Objecttype') en de gekozen filterkolom ("" = 'Filter' of de
+    # eerste beschikbare van Filter/Zoekfilter/Fase bij het inlezen).
+    # Headers of the 'Objecttypen' sheet (without 'Objecttype') and the chosen filter column ("" = 'Filter' or the
+    # first available of Filter/Zoekfilter/Fase at read time).
+    columns: list[str] = field(default_factory=list)
+    filter_column: str = ""
 
     def filters(self) -> dict[str, list[ObjectType]]:
-        """Objecttypen per filter, in volgorde van voorkomen. / Object types per filter, in order of appearance."""
+        """Objecttypen per filter (waarde in de gekozen filterkolom), in volgorde van voorkomen.
+        Object types per filter (value in the chosen filter column), in order of appearance."""
         result: dict[str, list[ObjectType]] = {}
         for object_type in self.object_types:
-            result.setdefault(object_type.filter, []).append(object_type)
+            name = (object_type.value(self.filter_column) if self.filter_column else "") or object_type.filter
+            if not name:
+                continue
+            members = result.setdefault(name, [])
+            if all(o.name != object_type.name for o in members):
+                members.append(object_type)
         return result
+
+    def resolve_filter_column(self, preferred: str = "") -> str:
+        """Kolomnaam (zoals in het bestand) die als filter dient: ``preferred`` als die bestaat, anders de eerste
+        van Filter/Zoekfilter/Fase. / Column name (as in the file) used as filter: ``preferred`` when it exists,
+        otherwise the first of Filter/Zoekfilter/Fase."""
+        by_key = {norm(c): c for c in self.columns}
+        for key in (norm(preferred), *DEFAULT_FILTER_COLUMNS):
+            if key in by_key:
+                return by_key[key]
+        return ""
 
     def merge(self, other: SpecModel) -> None:
         """Voeg een tweede specificatie toe (bijv. Wave 2 bovenop Wave 1); bestaande objecttypen blijven staan.
         Add a second specification (e.g. Wave 2 on top of Wave 1); existing object types are kept."""
-        known = {(o.name, o.filter) for o in self.object_types}
+        known = {(o.name, o.filter, o.values) for o in self.object_types}
         for object_type in other.object_types:
-            if (object_type.name, object_type.filter) not in known:
+            if (object_type.name, object_type.filter, object_type.values) not in known:
                 self.object_types.append(object_type)
+        seen_columns = {norm(c) for c in self.columns}
+        self.columns.extend(c for c in other.columns if norm(c) not in seen_columns)
         for name, attrs in other.attributes.items():
             target = self.attributes.setdefault(name, [])
             seen = {norm(a) for a in target}

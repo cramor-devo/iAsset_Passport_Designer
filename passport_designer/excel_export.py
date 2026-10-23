@@ -4,6 +4,7 @@ Exports passport designs to an Excel design file (one sheet per filter) with ope
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from openpyxl import Workbook
@@ -36,24 +37,59 @@ def sheet_title(name: str, used: set[str]) -> str:
     return candidate
 
 
-def _heading(sheet: Worksheet, row: int, section: Section, tab: PassportTab) -> None:
+@dataclass(frozen=True)
+class SheetCell:
+    """Eén cel van een ontwerpblad (1-gebaseerd), gedeeld door de Excel-export en het voorbeeld in de UI.
+    One cell of a design sheet (1-based), shared by the Excel export and the preview in the UI."""
+
+    row: int
+    column: int
+    value: str = ""
+    fill: str = ""  # RGB-kleur / RGB colour
+    bold: bool = False
+    italic: bool = False
+    size: int | None = None
+    wrap: bool = False
+    merge_to: int = 0  # laatste kolom bij samengevoegde cellen / last column of merged cells
+
+
+@dataclass
+class SheetLayout:
+    """Ontwerpblad: cellen plus kolombreedtes (in Excel-tekens). / Design sheet: cells plus column widths."""
+
+    cells: list[SheetCell] = field(default_factory=list)
+    widths: dict[int, int] = field(default_factory=dict)
+
+    @property
+    def row_count(self) -> int:
+        return max((c.row for c in self.cells), default=0)
+
+    @property
+    def column_count(self) -> int:
+        return max([*(max(c.column, c.merge_to) for c in self.cells), *self.widths], default=0)
+
+
+def _heading(cells: list[SheetCell], row: int, section: Section, tab: PassportTab) -> None:
     colour = tab.profile.semantic_fill if section.style is SectionStyle.SEMANTIC else GREY
-    fill = PatternFill("solid", fgColor=colour)
-    for column in range(1, tab.profile.grid_columns + 1):
-        sheet.cell(row=row, column=column).fill = fill
-    sheet.cell(row=row, column=1, value=section.title).font = BOLD
+    cells.append(SheetCell(row, 1, section.title, fill=colour, bold=True))
+    cells.extend(SheetCell(row, column, fill=colour) for column in range(2, tab.profile.grid_columns + 1))
 
 
-def write_tab(sheet: Worksheet, tab: PassportTab) -> None:
-    """Schrijf één paspoortontwerp naar een tabblad. / Write one passport design to a sheet."""
+def sheet_layout(tab: PassportTab) -> SheetLayout:
+    """Indeling van één paspoortontwerp zoals in het paspoortinrichting-bestand: titel, objecttypen eronder, secties
+    met grijze/blauwe koppen, een lege kolom en de opmerkingen (verwijzingen naar objecttypen) ernaast.
+    Layout of one passport design as in the passport design file: title, object types below, sections with
+    grey/blue headings, an empty column and the remarks (references to object types) beside them."""
     profile = tab.profile
     columns = profile.grid_columns
     margin_column = columns + 2  # één lege kolom tussen raster en opmerkingen / one empty column before the remarks
+    layout = SheetLayout()
+    cells = layout.cells
     row = 1
     if profile.header_lines:
-        sheet.cell(row=1, column=1, value=tab.name).font = Font(bold=True, size=18)
+        cells.append(SheetCell(1, 1, tab.name, bold=True, size=18))
         names = ", ".join(o.name for o in tab.object_types)
-        sheet.cell(row=2, column=1, value=f"Objecttypes: {names}").font = Font(italic=True)
+        cells.append(SheetCell(2, 1, f"Objecttypes: {names}", italic=True))
         row = 4
     sections = list(tab.sections)
     notes = notes_section(tab)
@@ -62,30 +98,46 @@ def write_tab(sheet: Worksheet, tab: PassportTab) -> None:
     for index, section in enumerate(sections):
         if index:
             row += 1  # witregel tussen secties / blank line between sections
-        _heading(sheet, row, section, tab)
+        _heading(cells, row, section, tab)
         if profile.margin_notes and index == 0:
-            sheet.cell(row=row, column=margin_column, value="Opmerkingen")
+            cells.append(SheetCell(row, margin_column, "Opmerkingen"))
         row += 1
-        for row_index, cells in enumerate(section.rows):
-            for column, cell in enumerate(cells, start=1):
-                target = sheet.cell(row=row, column=column, value=cell.display)
-                target.alignment = WRAP_TOP
-                if profile.bold_fields and section.style is not SectionStyle.NOTES:
-                    target.font = BOLD
-            if section.style is SectionStyle.NOTES and cells:
-                sheet.merge_cells(start_row=row, start_column=1, end_row=row, end_column=columns)
+        for row_index, row_cells in enumerate(section.rows):
+            is_notes = section.style is SectionStyle.NOTES
+            for column, cell in enumerate(row_cells, start=1):
+                bold = profile.bold_fields and not is_notes
+                merge_to = columns if is_notes and column == 1 and columns > 1 else 0
+                cells.append(SheetCell(row, column, cell.display, bold=bold, wrap=True, merge_to=merge_to))
             remark = section.margin.get(row_index)
             if remark:
-                sheet.cell(row=row, column=margin_column, value=remark).alignment = WRAP_TOP
+                cells.append(SheetCell(row, margin_column, remark, wrap=True))
             row += 1
-    for column in range(1, columns + 1):
-        sheet.column_dimensions[get_column_letter(column)].width = COLUMN_WIDTH
+    layout.widths = {column: COLUMN_WIDTH for column in range(1, columns + 1)}
     if profile.margin_notes:
-        sheet.column_dimensions[get_column_letter(margin_column)].width = MARGIN_WIDTH
+        layout.widths[margin_column] = MARGIN_WIDTH
+    return layout
 
 
-def export_workbook(tabs: list[PassportTab], path: str | Path) -> Path:
-    """Schrijf alle ontwerpen naar één xlsx-bestand. / Write all designs to one xlsx file."""
+def write_tab(sheet: Worksheet, tab: PassportTab) -> None:
+    """Schrijf één paspoortontwerp naar een tabblad. / Write one passport design to a sheet."""
+    layout = sheet_layout(tab)
+    for item in layout.cells:
+        target = sheet.cell(row=item.row, column=item.column, value=item.value or None)
+        if item.fill:
+            target.fill = PatternFill("solid", fgColor=item.fill)
+        if item.bold or item.italic or item.size:
+            target.font = Font(bold=item.bold, italic=item.italic, size=item.size)
+        if item.wrap:
+            target.alignment = WRAP_TOP
+        if item.merge_to:
+            sheet.merge_cells(start_row=item.row, start_column=item.column, end_row=item.row, end_column=item.merge_to)
+    for column, width in layout.widths.items():
+        sheet.column_dimensions[get_column_letter(column)].width = width
+
+
+def export_workbook(tabs: list[PassportTab], path: str | Path, sheet_names: list[str] | None = None) -> Path:
+    """Schrijf alle ontwerpen naar één xlsx-bestand; ``sheet_names`` vervangt desgewenst de tabbladnamen (bijv. per
+    objecttype). / Write all designs to one xlsx file; ``sheet_names`` optionally replaces the sheet names."""
     if not tabs:
         raise ValueError("No passport designs to export.")
     workbook = Workbook()
@@ -93,8 +145,9 @@ def export_workbook(tabs: list[PassportTab], path: str | Path) -> Path:
     if default_sheet is not None:
         workbook.remove(default_sheet)
     used: set[str] = set()
-    for tab in tabs:
-        write_tab(workbook.create_sheet(sheet_title(tab.name, used)), tab)
+    names = sheet_names if sheet_names is not None and len(sheet_names) == len(tabs) else [t.name for t in tabs]
+    for tab, name in zip(tabs, names, strict=True):
+        write_tab(workbook.create_sheet(sheet_title(name, used)), tab)
     target = Path(path)
     workbook.save(target)
     return target

@@ -47,3 +47,60 @@ def test_not_an_excel_file_raises_spec_error(tmp_path: Path):
     path.write_text("not a zip", encoding="utf-8")
     with pytest.raises(SpecError):
         read_spec(path)
+
+
+def test_objecttypen_columns_are_kept_and_filter_column_is_selectable(wave2_file):
+    spec = read_spec(wave2_file)
+    assert spec.columns == ["Organisatie", "Filter", "Systeem", "Fase", "Geometrietype"]
+    assert list(spec.filters()) == ["RD-Obsurv", "RD-Ultimo"]
+    spec.filter_column = spec.resolve_filter_column("fase")
+    assert spec.filter_column == "Fase"
+    assert {name: [o.name for o in types] for name, types in spec.filters().items()} == {
+        "Put": ["Aansluitput"], "Stuw": ["Aflaatstuw"],
+    }
+    assert spec.resolve_filter_column("does not exist") == "Filter"
+
+
+def _types_sheet(path: Path, header: list[str], rows: list[list[str]]) -> Path:
+    workbook = Workbook()
+    types = workbook.active
+    assert types is not None
+    types.title = "Objecttypen"
+    types.append(header)
+    for row in rows:
+        types.append(row)
+    attrs = workbook.create_sheet("Attributen")
+    attrs.append(["Objecttype", "Attribuut"])
+    attrs.append(["Aansluitput", "diameter"])
+    workbook.save(path)
+    return path
+
+
+def test_fase_is_the_filter_when_there_is_no_filter_column(tmp_path: Path):
+    path = _types_sheet(
+        tmp_path / "wave2.xlsx",
+        ["Organisatie", "Objecttype", "Systeem", "Fase"],
+        [
+            ["R", "Aansluitput", "Wave 2", "Put"],
+            ["R", "Inspectieput", "Wave 2", "Put"],
+            ["R", "Stuw", "Wave 2", "Stuw"],
+        ],
+    )
+    spec = read_spec(path)
+    assert spec.resolve_filter_column() == "Fase"
+    assert {name: [o.name for o in types] for name, types in spec.filters().items()} == {
+        "Put": ["Aansluitput", "Inspectieput"], "Stuw": ["Stuw"],
+    }
+
+
+def test_zoekfilter_column_is_recognised(tmp_path: Path):
+    path = _types_sheet(tmp_path / "old.xlsx", ["Objecttype", "Zoekfilter"], [["Aansluitput", "Putten"]])
+    spec = read_spec(path)
+    assert spec.resolve_filter_column() == "Zoekfilter"
+    assert list(spec.filters()) == ["Putten"]
+
+
+def test_objecttypen_without_any_filter_column_raise_spec_error(tmp_path: Path):
+    path = _types_sheet(tmp_path / "bad.xlsx", ["Objecttype", "Systeem"], [["Aansluitput", "Wave 2"]])
+    with pytest.raises(SpecError):
+        read_spec(path)
