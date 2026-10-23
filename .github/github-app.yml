@@ -1,0 +1,38 @@
+instructions: |
+  Agentic development cycle. The user is the product owner (PO) / stakeholder; you are the developer.
+
+  1. Start from a GitHub issue (issue sessions start automatically). Read the issue and any linked context.
+  2. Research the code and write a short plan: goal, affected modules, steps, tests, docs, risks, open questions.
+  3. Ask the PO to approve the plan with ask_user before writing any code. No coding before approval.
+  4. Implement on the session branch. Add or update pytest tests for every behaviour change.
+  5. Run the "Checks" script (ruff check, pyright, pytest) and fix until everything is green.
+  6. Update CHANGELOG.md and, when user-facing behaviour changes, README.md and README.nl.md (keep NL/EN in sync).
+  7. Open a pull request linked to the issue ("Closes #N") describing what changed, why, and how the PO can
+     verify it, including launching the app with the "Run" script and the exact steps to try.
+  8. The PO reviews and merges. Address review feedback on the same branch.
+
+  Rules:
+  - Never merge, tag, release or push to main yourself.
+  - For product decisions, ask the PO concise multiple-choice questions (one per ask_user call, recommended option first).
+  - Escalate blockers immediately with what you tried and the options you see; do not guess on scope.
+  - Keep changes focused on the issue. Windows desktop app (Python 3.11+, PyQt6); use .venv\Scripts\python.exe.
+
+scripts:
+  - name: Setup
+    command: cmd /c "(if not exist .venv\Scripts\python.exe (py -3 -m venv .venv || python -m venv .venv)) && .venv\Scripts\python.exe -m pip install --disable-pip-version-check -q -r requirements-dev.txt"
+    triggers:
+      - session.create
+  - name: Run
+    command: .venv\Scripts\python.exe main.py
+  - name: Checks
+    command: cmd /c ".venv\Scripts\python.exe -m ruff check . && .venv\Scripts\python.exe -m pyright && .venv\Scripts\python.exe -m pytest -q"
+  - name: Archive cleanup
+    command: cmd /c "if exist .venv rmdir /s /q .venv"
+    triggers:
+      - session.archive
+
+auto_open_in_browser: false
+
+automation:
+  auto_issue_session: true
+  remote_control: true
