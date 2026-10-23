@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+- Application icon (iAsset Syncer style with a passport), used for windows, the taskbar and the exe
+  (`passport_designer/assets`, regenerate ICO/PNG with `python tools/generate_app_icon.py`).
+
 ## 0.2.0
 - Single-file Windows executable (`iAsset_Passport_Designer.exe`, PyInstaller) and `build.ps1`.
 - Design profile `rotterdam_v3` (default), modelled on the manually tuned Wave-1-v3 workbook: title/`Objecttypes` header,

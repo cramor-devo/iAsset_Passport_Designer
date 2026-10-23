@@ -81,3 +81,9 @@ def test_filter_and_object_type_switch_updates_payload(window):
     assert "Verharding" in window.payload_text.toPlainText()
     assert window.type_combo.currentText() == "Asfaltverharding"
     translator.set_language("en")
+
+
+def test_application_icon_renders(app):
+    from passport_designer.ui.branding import application_icon
+
+    assert not application_icon().pixmap(32, 32).isNull()
