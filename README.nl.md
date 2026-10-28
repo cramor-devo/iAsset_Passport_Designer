@@ -74,8 +74,9 @@ Het logbestand staat in `%LOCALAPPDATA%\iAssetPassportDesigner\passport_designer
    gelden, krijgen een voetnoot: dit zijn de velden die je in iAsset per subthema aan- of uitzet. Met **Voorbeeld
    samengevoegd paspoort** bekijk je een voorstel, met **Samenvoegen toepassen** voeg je de filters samen en met
    **Samenvoegmatrix exporteren…** sla je een matrix van velden × objecttypen op.
-5. Kies **Bestand → Veld-ID-bestand laden…** om een export van `GET /diverse-fields` te laden (JSON, CSV of xlsx met
-   de kolommen label/name en id). Zonder veld-ID's krijgt `field_id` de waarde `null` en meldt het tabblad
+5. Kies **Bestand → Veld-ID-bestand laden…** om een export van `GET /diverse-fields` te laden: de V2-paspoort-diverse-veldenlijst (bijv. `passport field list.csv`,
+   CSV met puntkomma `id;label;name;type;values;…`; JSON en xlsx met label/name en id werken ook). Elk paspoortveld
+   krijgt de `id` van het diverse veld met dezelfde label. Zonder veld-ID's krijgt `field_id` de waarde `null` en meldt het tabblad
    **Validatie** een fout.
 6. Op het tabblad **API-payload** kopieer je de payload of sla je hem op. Plak de JSON in iAsset Syncer → API Explorer
    → V2 → `POST /passport-tabs`. Syncer verstuurt de gegevens als multipart-formulier
