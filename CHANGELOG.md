@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.1
 - Field ID import now reads the V2 passport diverse-fields list (`passport field list.csv`): fixed CSV parsing of the
   large JSON `values` column (quoted newlines, `;` inside cells), so passport fields get their IDs from it.
 
