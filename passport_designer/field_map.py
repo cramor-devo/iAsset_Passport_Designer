@@ -4,6 +4,7 @@ Maps field labels to iAsset field IDs, loaded from an export of GET /fields or /
 from __future__ import annotations
 
 import csv
+import io
 import json
 import logging
 from pathlib import Path
@@ -101,11 +102,13 @@ def _records_from_json(path: Path) -> list[dict[str, object]]:
 
 def _records_from_csv(path: Path) -> list[dict[str, object]]:
     text = path.read_text(encoding="utf-8-sig")
-    try:
-        dialect = csv.Sniffer().sniff(text[:4096], delimiters=",;\t")
-    except csv.Error:
-        dialect = csv.excel
-    return [dict(row) for row in csv.DictReader(text.splitlines(), dialect=dialect)]
+    # Scheidingsteken uit de koptekst: de "values"-kolom bevat zelf ';' en komma's, en regeleinden tussen quotes.
+    # Delimiter from the header line only: the "values" column itself contains ';' and commas, and quoted newlines.
+    header = text.split("\n", 1)[0]
+    delimiter = max(",;\t", key=header.count)
+    # Passport diverse-fields exports hold huge JSON cells in "values" / Exports hebben enorme JSON-cellen
+    csv.field_size_limit(2**30)
+    return [dict(row) for row in csv.DictReader(io.StringIO(text, newline=""), delimiter=delimiter)]
 
 
 def _records_from_xlsx(path: Path) -> list[dict[str, object]]:

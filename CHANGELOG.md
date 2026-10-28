@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+- Field ID import now reads the V2 passport diverse-fields list (`passport field list.csv`): fixed CSV parsing of the
+  large JSON `values` column (quoted newlines, `;` inside cells), so passport fields get their IDs from it.
+
 ## 0.3.0
 - Release workflow: publishing a GitHub release builds the exe on `windows-latest` (after ruff and pytest) and attaches
   the exe and its SHA256 file to the release; can be re-run manually for a tag.

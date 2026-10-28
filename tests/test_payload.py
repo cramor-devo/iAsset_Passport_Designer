@@ -126,3 +126,17 @@ def test_field_map_from_json_csv_and_errors(tmp_path: Path):
         FieldIdMap.from_file(bad)
     with pytest.raises(FieldMapError):
         FieldIdMap.from_file(tmp_path / "x.txt")
+
+
+def test_field_map_passport_field_list_csv(tmp_path: Path):
+    values = json.dumps([{"value": "1", "label": "a;b, c"}, {"value": "2", "label": "x\ny"}])
+    quoted = '"' + values.replace('"', '""') + '"'
+    csv_file = tmp_path / "passport field list.csv"
+    csv_file.write_text(
+        "id;label;name;type;values\n"
+        f"600795;bordcode;bordcode_I;select;{quoted}\n"
+        "601075;Bordtekst;Bordtekst;input;\n",
+        encoding="utf-8",
+    )
+    ids = FieldIdMap.from_file(csv_file)
+    assert len(ids) == 2 and ids.lookup("Bordcode") == 600795 and ids.lookup("bordtekst") == 601075

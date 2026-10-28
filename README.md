@@ -71,8 +71,9 @@ The log file is stored at `%LOCALAPPDATA%\iAssetPassportDesigner\passport_design
    group and similar attributes (Jaccard similarity). Fields that do not apply to every object type get a footnote:
    these are the fields you switch on or off per sub-theme in iAsset. Use **Preview merged passport** to inspect a
    suggestion, **Apply merge** to merge the filters, and **Export merge matrix…** to save a field × object type matrix.
-5. Choose **File → Load field ID file…** to load an export of `GET /diverse-fields` (JSON, CSV or xlsx with the columns
-   label/name and id). Without field IDs, `field_id` is set to `null` and the **Validation** tab reports an error.
+5. Choose **File → Load field ID file…** to load the V2 passport diverse-fields list (e.g. `passport field list.csv`, semicolon CSV with
+   `id;label;name;type;values;…`; JSON and xlsx with label/name and id also work). Each passport field gets the `id`
+   of the diverse field with the same label. Without field IDs, `field_id` is set to `null` and the **Validation** tab reports an error.
 6. On the **API payload** tab, copy the payload or save it to a file. Paste the JSON into iAsset Syncer → API Explorer
    → V2 → `POST /passport-tabs`. Syncer sends it as multipart form data (`fields[0][children][1][label]`); the
    **Form fields (Laravel)** format shows the same fields in that form.
