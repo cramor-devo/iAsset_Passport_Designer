@@ -49,6 +49,7 @@ class RelationSection:
     repeat: int = 1
     repeater: bool = False
     remarks: tuple[tuple[int, str], ...] = ()
+    element_id: int = 18  # iAsset-relatietype (18 = Is verbonden met) / iAsset relation type
 
 
 @dataclass(frozen=True)
@@ -139,6 +140,7 @@ def load_relations(path: Path = RELATIONS_FILE) -> tuple[RelationSection, ...]:
                 repeat=int(item.get("repeat", 1)),
                 repeater=bool(item.get("repeater", False)),
                 remarks=tuple((int(k), v) for k, v in item.get("remarks", {}).items()),
+                element_id=int(item.get("element", 18)),
             ),
         )
     return tuple(result)

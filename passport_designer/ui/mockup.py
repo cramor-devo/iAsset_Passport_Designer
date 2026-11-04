@@ -6,6 +6,7 @@ from __future__ import annotations
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QPixmap
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QFrame,
     QGridLayout,
@@ -23,6 +24,7 @@ from ..crossref import label_key
 from ..i18n import tr
 from ..layout_engine import notes_section
 from ..models import Cell, PassportTab, Section, SectionStyle
+from ..payload import ELEMENT_MEMO, ELEMENT_ROW, section_element
 from .theme import DARK, KIND_COLOURS, Palette
 
 EXPORT_WIDTH = 1100
@@ -39,6 +41,20 @@ BOX_PERCENT = 88  # breedte van een waardevak in procenten van de kolom / width 
 TABLE_ICONS = ("🔗", "⊘", "↪")  # koppelen, ontkoppelen, koppelen-pijl / link, unlink, link-arrow
 PAGER_FIRST, PAGER_LAST = ("«", "‹"), ("›", "»")
 GEAR = "⚙"
+DROPDOWN_COLUMNS = frozenset({"thema", "subthema", "objecttype"})
+ALL_TEXT, CHEVRON = "Alle", "⌄"
+SAMPLE_TABLE_ROWS = 3
+NOT_APPLICABLE = "n.v.t."
+RELATION_ELEMENTS = frozenset({17, 18, 20, 21, 22, 23, 24, 25, 26, 27})
+
+
+def is_relation_table(section: Section, profile: object) -> bool:
+    """Wordt deze sectie in iAsset een koppeltabel? (memo of relatie-element, of via profile.table_sections)
+    Does iAsset show this section as a linked-object table? (memo or relation element, or profile.table_sections)"""
+    code = section_element(section, profile)  # type: ignore[arg-type]
+    if code == ELEMENT_MEMO or code in RELATION_ELEMENTS:
+        return True
+    return code == ELEMENT_ROW and bool(getattr(profile, "is_table_section", lambda _t: False)(section.title))
 
 
 class PassportMockup(QFrame):
@@ -227,7 +243,7 @@ class PassportMockup(QFrame):
         layout = QVBoxLayout(wrapper)
         layout.setContentsMargins(0, 10, 0, 10)
         layout.setSpacing(4)
-        is_table = section.style is not SectionStyle.NOTES and tab.profile.is_table_section(section.title)
+        is_table = section.style is not SectionStyle.NOTES and is_relation_table(section, tab.profile)
         heading = QLabel(tr("mock.notes") if section.style is SectionStyle.NOTES else section.title)
         heading.setObjectName("mockSection")
         # iAsset toont (Sem.Rel)-titels gelijk aan andere secties / iAsset shows (Sem.Rel) titles like other sections.
@@ -370,42 +386,105 @@ class PassportMockup(QFrame):
             top.addWidget(button)
         outer.addLayout(top)
         outer.addWidget(self._separator())
+        sample = section_element(section, tab.profile) != ELEMENT_MEMO and bool(cells)
         columns = QWidget()
-        grid = self._new_grid(columns, stretch)
+        grid = self._new_grid(columns, [0, *stretch])
         grid.setHorizontalSpacing(10)
-        for column, cell in enumerate(cells):
+        offset = 1
+        if sample:
+            grid.addWidget(self._checkbox(), 1, 0)
+        for column, cell in enumerate(cells, start=offset):
             colour = self._highlights.get(label_key(cell.label)) if self._highlights else None
             title = QLabel(self._caption(cell))
             title.setObjectName("mockTableHead")
             title.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             title.setStyleSheet(f"color: {p.text}; font-weight: 700; font-size: 8pt; background: transparent;")
             title.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-            box = QLabel(tr("mock.search", label=cell.label.lower()))
-            box.setObjectName("mockSearch")
+            border = KIND_COLOURS.get(colour, p.separator) if colour else p.separator
+            style = (
+                f"background: transparent; color: {p.muted}; border: {2 if colour else 1}px solid {border}; "
+                f"border-radius: 3px; padding: 2px 8px; font-size: 9pt;"
+            )
+            if cell.label.casefold().strip() in DROPDOWN_COLUMNS:
+                box: QWidget = QFrame()
+                box.setObjectName("mockDropdown")
+                inner = QHBoxLayout(box)
+                inner.setContentsMargins(0, 0, 6, 0)
+                for text in (ALL_TEXT, CHEVRON):
+                    part = QLabel(text)
+                    part.setStyleSheet(f"color: {p.muted}; font-size: 9pt; border: none; background: transparent;")
+                    inner.addWidget(part, 1 if text == ALL_TEXT else 0)
+                box.setStyleSheet(f"QFrame#mockDropdown {{ {style} padding: 0 0 0 8px; }}")
+            else:
+                box = QLabel(tr("mock.search", label=cell.label.lower()))
+                box.setObjectName("mockSearch")
+                box.setStyleSheet(style)
             box.setMinimumHeight(26)
             box.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
-            border = KIND_COLOURS.get(colour, p.separator) if colour else p.separator
-            width = 2 if colour else 1
-            box.setStyleSheet(
-                f"background: transparent; color: {p.muted}; border: {width}px solid {border}; "
-                f"border-radius: 3px; padding: 2px 8px; font-size: 9pt;",
-            )
             tips = self._tips(tab, cell, colour)
             title.setToolTip(tips)
             box.setToolTip(tips)
             grid.addWidget(title, 0, column)
             grid.addWidget(box, 1, column)
         outer.addWidget(columns)
-        empty = QLabel(tr("mock.no_data"))
-        empty.setObjectName("mockNoData")
-        empty.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter)
-        empty.setStyleSheet(f"color: {p.muted}; font-size: 9pt; padding: 8px 0; background: transparent;")
-        outer.addWidget(empty)
+        if sample:
+            outer.addWidget(self._sample_rows(cells, stretch))
+        else:
+            empty = QLabel(tr("mock.no_data"))
+            empty.setObjectName("mockNoData")
+            empty.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter)
+            empty.setStyleSheet(f"color: {p.muted}; font-size: 9pt; padding: 8px 0; background: transparent;")
+            outer.addWidget(empty)
         outer.addWidget(self._separator())
-        outer.addWidget(self._build_pager())
+        outer.addWidget(self._build_pager("mock.pager_rows" if sample else "mock.pager"))
         return table
 
-    def _build_pager(self) -> QWidget:
+    def _checkbox(self) -> QCheckBox:
+        p = self._palette
+        box = QCheckBox()
+        box.setObjectName("mockCheck")
+        box.setEnabled(False)
+        box.setFixedWidth(22)
+        box.setStyleSheet(
+            f"QCheckBox::indicator {{ width: 14px; height: 14px; border: 1px solid {p.muted}; border-radius: 3px; "
+            f"background: transparent; }}",
+        )
+        return box
+
+    def _sample_rows(self, cells: list[Cell], stretch: list[int]) -> QWidget:
+        """Drie voorbeeldrijen met selectievakje, wisselende achtergrond en scheidingslijnen.
+        Three sample rows with a checkbox, zebra background and separator lines."""
+        p = self._palette
+        block = QWidget()
+        block.setObjectName("mockTableBody")
+        outer = QVBoxLayout(block)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        line, zebra = self._shade(p.body, 14), self._shade(p.body, 6)
+        for number in range(SAMPLE_TABLE_ROWS):
+            frame = QFrame()
+            frame.setObjectName("mockTableRow")
+            background = zebra if number % 2 else "transparent"
+            frame.setStyleSheet(
+                f"QFrame#mockTableRow {{ background: {background}; border: none; border-top: 1px solid {line}; }}",
+            )
+            grid = self._new_grid(frame, [0, *stretch])
+            grid.setHorizontalSpacing(10)
+            grid.setContentsMargins(0, 6, 0, 6)
+            grid.addWidget(self._checkbox(), 0, 0)
+            for column, cell in enumerate(cells, start=1):
+                if "nummer" in cell.label.casefold():
+                    value = QLabel(f"<u>{NOT_APPLICABLE}</u>")
+                    value.setObjectName("mockLink")
+                else:
+                    value = QLabel("–")
+                    value.setObjectName("mockDash")
+                value.setStyleSheet(f"color: {p.muted}; font-size: 9pt; background: transparent; border: none;")
+                grid.addWidget(value, 0, column)
+            outer.addWidget(frame)
+        return block
+
+    def _build_pager(self, text_key: str = "mock.pager") -> QWidget:
         p = self._palette
         pager = QWidget()
         pager.setObjectName("mockPager")
@@ -424,7 +503,7 @@ class PassportMockup(QFrame):
 
         for glyph in PAGER_FIRST:
             layout.addWidget(round_button(glyph))
-        text = QLabel(tr("mock.pager"))
+        text = QLabel(tr(text_key))
         text.setObjectName("mockPagerText")
         text.setStyleSheet(f"color: {p.text}; font-size: 9pt; padding: 0 8px; background: transparent;")
         layout.addWidget(text)

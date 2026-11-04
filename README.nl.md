@@ -161,24 +161,27 @@ Haal de relatiesecties (Sem.Rel) uit zo'n bestand en schrijf ze naar
 python tools/extract_relations.py handmatig.xlsx
 ```
 
-## Aannames om te controleren op een testomgeving
+## Payload-codes (gecontroleerd)
 
-De OpenAPI-specificatie van `POST /passport-tabs` noemt `field_type ∈ {0, 1, 2}`, maar legt niet uit wat de waarden
-betekenen. Het programma gebruikt daarom deze standaardwaarden:
+De payload heeft dezelfde structuur als wat iAsset echt opslaat, gecontroleerd met een echte `GET /templates/tabs`:
 
-- een rij (bovenste niveau) krijgt `field_type` `1` en een veld (onderliggend niveau) krijgt `field_type` `0`;
-- de `field_id` van een rij is `0`;
-- `order` begint bij `1`;
-- rijen zonder titel krijgen het onzichtbare label U+FE0F, net zoals iAsset dat zelf doet.
+- secties zijn layout-elementen (`field_type` `2`): rij/sectie `10` (vervolgrijen krijgen het onzichtbare label
+  U+FE0F), horizontale lijn `1`, *Actoren en rollen* `11`, *Memo* / *Is beschreven door* `19`, relaties `17`–`27`
+  (standaard `18` *Is verbonden met*; *Constructielagen* is `23` *Bestaat uit*), *Geometrie* `4`, *iASSET-id* `16`;
+- velden zijn systeemvelden (`field_type` `0`: Nummer 1, Naam 2, Thema 3, Subthema 4, Rds coordinaten 23) of diverse
+  velden (`field_type` `1`, ID uit het veld-ID-bestand);
+- tussen opeenvolgende secties komt een horizontale lijn; *iASSET-id* is een eigen element helemaal aan het eind;
+- `order` begint bij `1` en telt items op het bovenste niveau (lijnen meegeteld) en onderliggende velden apart;
+- niet herkende relatiesecties worden als *Is verbonden met* verstuurd, met een INFO-melding.
 
-Je kunt deze waarden aanpassen via **Instellingen → Payload-instellingen…**. Controleer ze op een testomgeving
-voordat je de payloads in productie gebruikt.
+Alle codes (en de lijnen) kun je aanpassen via **Instellingen → Payload-instellingen…**. Zichtbaarheid per sjabloon
+stel je in met `POST/PATCH /templates`, niet in deze payload.
 
 ## Bekende beperkingen
 
 - Bepalen welke velden in welk paspoort horen, blijft mensenwerk. Het programma toont liever te veel velden dan te
   weinig; jij haalt weg wat niet nodig is.
-- Herhaalbare secties (Actoren, Memo) worden als één rij verstuurd. Zet ze daarna in iAsset op herhalen.
+- Relatie-, Memo- en Actoren-secties worden als iAsset-elementen verstuurd; de voorbeeldrijen uit het ontwerp niet.
 - Objecttypen zonder attributen in de brongegevens worden gemeld op het tabblad **Validatie**.
 
 ## Ontwikkelen

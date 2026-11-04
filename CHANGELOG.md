@@ -1,6 +1,14 @@
 # Changelog
 
 ## 0.4.0
+- The `POST /passport-tabs` payload now matches what iAsset really stores (verified against a real `GET /templates/tabs`):
+  layout elements (`field_type` 2: row 10, line 1, *Actoren en rollen* 11, *Memo* 19, relations 17–27 incl.
+  *Constructielagen* 23, *Geometrie* 4, *iASSET-id* 16), system fields (`field_type` 0) and diverse fields
+  (`field_type` 1), a horizontal line between sections (switchable), *iASSET-id* as its own last element, no footnote
+  numbers in labels. New settings are stored under new keys, so old saved defaults no longer apply.
+- The mockup shows every relation element (not only *Memo*) as an iAsset linked-object table: link buttons, search
+  boxes and *Alle* dropdowns (Thema, Subthema, Objecttype), three sample rows with checkboxes, and a pager; *Memo*
+  keeps the empty state.
 - Import a manually refined Excel design (*File → Import refined Excel…*) and show it as an iAsset-style mockup with
   Excel-relative column widths. The *Cross-reference* panel compares it with a freshly generated design from the loaded
   specification (added, removed, moved and renamed fields per section, plus labels not in the spec); *View → Highlight

@@ -96,7 +96,7 @@ def test_payload_collapses_repeaters_and_strips_asterisks(wave1_spec):
     assert "…" not in labels
     assert labels.count("Rol") == 1
     codes = {i.code for i in build_tab_payload(tab).issues}
-    assert {"repeater-sections", "open-design-questions"} <= codes
+    assert "open-design-questions" in codes
 
 
 def test_excel_layout_matches_manual_style(tmp_path, wave1_spec):

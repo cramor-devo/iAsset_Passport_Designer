@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QFormLayout, QLabel, QSpinBox, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QCheckBox, QDialog, QDialogButtonBox, QFormLayout, QLabel, QSpinBox, QVBoxLayout, QWidget
 
 from ..i18n import tr
 from ..payload import PayloadOptions
@@ -22,17 +22,24 @@ class PayloadSettingsDialog(QDialog):
         self.group_type = self._spin(options.group_field_type, 0)
         self.field_type = self._spin(options.field_field_type, 0)
         self.group_id = self._spin(options.group_field_id, 0)
+        self.system_type = self._spin(options.system_field_type, 0)
+        self.line_id = self._spin(options.line_field_id, 0)
+        self.separators = QCheckBox(tr("settings.separators"))
+        self.separators.setChecked(options.separators)
         self.order_start = self._spin(options.order_start, 0)
         for key, spin in (
             ("settings.theme_id", self.theme_id),
             ("settings.group_type", self.group_type),
             ("settings.field_type", self.field_type),
             ("settings.group_id", self.group_id),
+            ("settings.system_type", self.system_type),
+            ("settings.line_id", self.line_id),
             ("settings.order_start", self.order_start),
         ):
             label = QLabel(tr(key))
             label.setBuddy(spin)
             form.addRow(label, spin)
+        form.addRow(self.separators)
         layout.addLayout(form)
         note = QLabel(tr("settings.note"))
         note.setWordWrap(True)
@@ -55,6 +62,9 @@ class PayloadSettingsDialog(QDialog):
             group_field_type=self.group_type.value(),
             field_field_type=self.field_type.value(),
             group_field_id=self.group_id.value(),
+            system_field_type=self.system_type.value(),
+            line_field_id=self.line_id.value(),
+            separators=self.separators.isChecked(),
             order_start=self.order_start.value(),
             active=self._base.active,
         )

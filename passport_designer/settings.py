@@ -57,18 +57,28 @@ class AppSettings:
         self._qs.setValue(key, value)
 
     def payload_options(self) -> PayloadOptions:
-        defaults = PayloadOptions()
+        # NL: nieuwe sleutels (payload/v2/...) zodat oude opgeslagen standaardwaarden (1/0/0) niet overschrijven.
+        # EN: new keys (payload/v2/...) so old saved defaults (1/0/0) do not override the new ones.
+        d = PayloadOptions()
+        k = "payload/v2/"
         return PayloadOptions(
-            theme_id=self.integer("payload/theme_id", defaults.theme_id),
-            group_field_type=self.integer("payload/group_field_type", defaults.group_field_type),
-            field_field_type=self.integer("payload/field_field_type", defaults.field_field_type),
-            group_field_id=self.integer("payload/group_field_id", defaults.group_field_id),
-            order_start=self.integer("payload/order_start", defaults.order_start),
+            theme_id=self.integer("payload/theme_id", d.theme_id),
+            group_field_type=self.integer(k + "group_field_type", d.group_field_type),
+            field_field_type=self.integer(k + "field_field_type", d.field_field_type),
+            system_field_type=self.integer(k + "system_field_type", d.system_field_type),
+            group_field_id=self.integer(k + "group_field_id", d.group_field_id),
+            line_field_id=self.integer(k + "line_field_id", d.line_field_id),
+            separators=self.boolean(k + "separators", d.separators),
+            order_start=self.integer("payload/order_start", d.order_start),
         )
 
     def save_payload_options(self, options: PayloadOptions) -> None:
+        k = "payload/v2/"
         self.set("payload/theme_id", options.theme_id)
-        self.set("payload/group_field_type", options.group_field_type)
-        self.set("payload/field_field_type", options.field_field_type)
-        self.set("payload/group_field_id", options.group_field_id)
+        self.set(k + "group_field_type", options.group_field_type)
+        self.set(k + "field_field_type", options.field_field_type)
+        self.set(k + "system_field_type", options.system_field_type)
+        self.set(k + "group_field_id", options.group_field_id)
+        self.set(k + "line_field_id", options.line_field_id)
+        self.set(k + "separators", options.separators)
         self.set("payload/order_start", options.order_start)

@@ -154,24 +154,27 @@ Extract the relation sections (Sem.Rel) from such a workbook into
 python tools/extract_relations.py handmatig.xlsx
 ```
 
-## Assumptions to check on a test environment
+## Payload codes (verified)
 
-The OpenAPI specification of `POST /passport-tabs` lists `field_type ∈ {0, 1, 2}` but does not say what the values
-mean. The designer therefore uses these defaults:
+The payload structure matches what iAsset really stores, verified against a real `GET /templates/tabs` response:
 
-- a row (top level) has `field_type` `1`, and a field (child) has `field_type` `0`;
-- the `field_id` of a row is `0`;
-- `order` starts at `1`;
-- rows without a title get the invisible label U+FE0F, as iAsset itself does.
+- sections are layout elements (`field_type` `2`): row/section `10` (continuation rows get the invisible label
+  U+FE0F), horizontal line `1`, *Actoren en rollen* `11`, *Memo* / *Is beschreven door* `19`, relations `17`–`27`
+  (default `18` *Is verbonden met*; *Constructielagen* is `23` *Bestaat uit*), *Geometrie* `4`, *iASSET-id* `16`;
+- fields are system fields (`field_type` `0`: Nummer 1, Naam 2, Thema 3, Subthema 4, Rds coordinaten 23) or diverse
+  fields (`field_type` `1`, ID from the field ID file);
+- a horizontal line is placed between consecutive sections; *iASSET-id* is its own element at the very end;
+- `order` starts at `1` and counts top-level items (lines included) and children separately;
+- relation sections that cannot be recognised are sent as *Is verbonden met* with an INFO message.
 
-You can change these defaults under **Settings → Payload settings…**. Check them on a test environment before you
-use the payloads in production.
+All codes (and the lines) are configurable under **Settings → Payload settings…**. Per-template visibility is set
+with `POST/PATCH /templates`, not in this payload.
 
 ## Known limitations
 
 - Deciding which fields belong in each passport is still a human task. The designer errs on the side of showing too
   many fields rather than too few, so you only need to remove what is not needed.
-- Repeating sections (Actoren, Memo) are sent as a single row. Set them to repeat in iAsset afterwards.
+- Relation, Memo and Actoren sections are sent as iAsset elements; the sample rows of the design are not sent.
 - Object types without attributes in the source data are reported on the **Validation** tab.
 
 ## Development

@@ -9,11 +9,13 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtCore import Qt  # noqa: E402
-from PyQt6.QtWidgets import QApplication, QGridLayout, QHBoxLayout, QLabel, QWidget  # noqa: E402
+from PyQt6.QtWidgets import QApplication, QCheckBox, QGridLayout, QHBoxLayout, QLabel, QWidget  # noqa: E402
 
 from passport_designer.i18n import tr  # noqa: E402
 from passport_designer.layout_engine import LayoutEngine  # noqa: E402
-from passport_designer.ui.mockup import EXPORT_WIDTH, PassportMockup  # noqa: E402
+from passport_designer.models import Cell, PassportTab, Section  # noqa: E402
+from passport_designer.profiles import ROTTERDAM_V3  # noqa: E402
+from passport_designer.ui.mockup import EXPORT_WIDTH, PassportMockup, is_relation_table  # noqa: E402
 from passport_designer.ui.theme import DARK, KIND_COLOURS, LIGHT  # noqa: E402
 
 
@@ -43,7 +45,7 @@ def test_row_with_n_fields_has_n_full_width_columns(tab):
     mockup.show_tab(tab, "", DARK)
     sizes = set()
     for index, section in enumerate(tab.sections):
-        plain = not section.repeater and not tab.profile.is_table_section(section.title)
+        plain = not section.repeater and not is_relation_table(section, tab.profile)
         for row_index, row in enumerate(section.rows):
             assert mockup.row_stretch(index, row_index, list(range(len(row)))) == [1] * len(row)
             if row and plain:
@@ -140,8 +142,8 @@ def test_memo_is_a_table_with_search_boxes_and_pager(tab):
     mockup = PassportMockup()
     mockup.show_tab(tab, "", DARK)
     tables = mockup.findChildren(QWidget, "mockTable")
-    assert len(tables) == 1
-    table = tables[0]
+    assert len(tables) >= 1
+    table = next(t for t in tables if t.findChildren(QLabel, "mockNoData"))
     assert [t.text() for t in table.findChildren(QLabel, "mockTableHead")] == ["Nummer", "Memo veld"]
     assert all(t.alignment() & Qt.AlignmentFlag.AlignLeft for t in table.findChildren(QLabel, "mockTableHead"))
     assert [b.text() for b in table.findChildren(QLabel, "mockSearch")] == ["Zoeken op nummer", "Zoeken op memo veld"]
@@ -154,3 +156,44 @@ def test_memo_is_a_table_with_search_boxes_and_pager(tab):
 
 def test_table_sections_are_configurable_per_profile(tab):
     assert tab.profile.is_table_section("Memo (Sem.Rel)") and not tab.profile.is_table_section("Actoren (Sem.Rel)")
+
+
+def _relation_tab() -> PassportTab:
+    sections = [
+        Section("Drager informatie (Sem.Rel)", rows=[[Cell(x) for x in ("Nummer", "Naam", "Thema", "Subthema")]],
+                repeater=True),
+        Section("Constructielagen (Sem.Rel)", rows=[[Cell("Laagnummer"), Cell("Objecttype")], [Cell("…")] * 2],
+                repeater=True),
+        Section("Memo (Sem.Rel)", rows=[[Cell("Nummer"), Cell("Memo veld")]], repeater=True),
+        Section("Actoren en rollen (Sem.Rel)", rows=[[Cell("Rol"), Cell("Actor")]], repeater=True),
+    ]
+    return PassportTab("Drager", "", [], sections, profile=ROTTERDAM_V3)
+
+
+def test_relation_sections_render_as_tables_with_sample_rows(app):
+    mockup = PassportMockup()
+    for palette in (DARK, LIGHT):
+        mockup.show_tab(_relation_tab(), "", palette)
+        tables = mockup.findChildren(QWidget, "mockTable")
+        assert len(tables) == 3  # twee relaties + memo; Actoren blijft repeater / actors stays repeater
+        drager, lagen, memo = tables
+        assert [b.text() for b in drager.findChildren(QLabel, "mockSearch")] == ["Zoeken op nummer", "Zoeken op naam"]
+        dropdowns = drager.findChildren(QWidget, "mockDropdown")
+        assert len(dropdowns) == 2
+        assert all([x.text() for x in d.findChildren(QLabel)] == ["Alle", "⌄"] for d in dropdowns)
+        assert len(lagen.findChildren(QWidget, "mockDropdown")) == 1  # Objecttype
+        rows = drager.findChildren(QWidget, "mockTableRow")
+        assert len(rows) == 3 and len(rows[0].findChildren(QCheckBox)) == 1
+        assert len(drager.findChildren(QCheckBox)) == 4  # 3 rijen + filterrij / 3 rows + filter row
+        assert drager.findChildren(QLabel, "mockPagerText")[0].text() == tr("mock.pager_rows")
+        assert [x.text() for x in drager.findChildren(QLabel, "mockLink")] == ["<u>n.v.t.</u>"] * 3
+        assert memo.findChildren(QLabel, "mockNoData")[0].text() == tr("mock.no_data")
+        assert memo.findChildren(QLabel, "mockPagerText")[0].text() == tr("mock.pager")
+        assert not memo.findChildren(QCheckBox)
+        assert len(mockup.findChildren(QWidget, "mockRepeatHead")) == 1
+    assert not mockup.render_pixmap().isNull()
+
+
+def test_extra_table_prefixes_still_work():
+    profile = ROTTERDAM_V3.__class__(**{**ROTTERDAM_V3.__dict__, "table_sections": ("Memo", "Foo")})
+    assert is_relation_table(Section("Foo bar"), profile) and not is_relation_table(Section("Basis"), profile)

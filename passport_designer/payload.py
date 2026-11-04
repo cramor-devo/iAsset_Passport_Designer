@@ -1,24 +1,28 @@
 """Genereert de request-body voor POST /passport-tabs (iAsset API V2) uit een PassportTab.
 Generates the request body for POST /passport-tabs (iAsset API V2) from a PassportTab.
 
-NL: De body is een JSON-object dat je in de API Explorer van iAsset Syncer plakt; Syncer verstuurt het als
-multipart-formulier met Laravel-notatie (fields[0][children][1][label]). Elke rij van het raster wordt één
-top-level 'field' (de rij) met de velden als 'children'; dat past bij de API (één niveau children) en bij het
-iAsset-paspoort, waar elke rij een tabel met kolomkoppen is.
-EN: The body is a JSON object you paste into the API Explorer of iAsset Syncer; Syncer sends it as a multipart form
-with Laravel notation (fields[0][children][1][label]). Each grid row becomes one top-level 'field' (the row) with the
-fields as 'children'; this fits the API (one level of children) and the iAsset passport, where each row is a table
-with column headings.
+NL: De body is een JSON-object dat je in de API Explorer van iAsset Syncer plakt. De structuur is gelijk aan wat
+iAsset echt opslaat (gecontroleerd met een echte GET /templates/tabs): secties worden layout-elementen (field_type 2:
+rij 10, lijn 1, Actoren en rollen 11, relaties 17-27, Memo 19, Geometrie 4, iASSET-id 16), velden zijn systeemvelden
+(field_type 0) of diverse velden (field_type 1). Zichtbaarheid per paspoortsjabloon (visibilities) hoort bij
+POST/PATCH /templates, niet bij /passport-tabs en zit dus niet in deze body.
+EN: The body is a JSON object you paste into the API Explorer of iAsset Syncer. Its structure matches what iAsset
+really stores (verified against a real GET /templates/tabs): sections become layout elements (field_type 2: row 10,
+line 1, Actoren en rollen 11, relations 17-27, Memo 19, Geometrie 4, iASSET-id 16), fields are system fields
+(field_type 0) or diverse fields (field_type 1). Per-template visibility (visibilities) belongs to POST/PATCH
+/templates, not /passport-tabs, so it is not part of this body.
 """
 
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
 from .field_map import FieldIdMap
-from .models import Issue, PassportTab, Severity
+from .models import Issue, PassportTab, Section, Severity
+from .profiles import ELLIPSIS, DesignProfile
 
 ENDPOINT = "POST /passport-tabs"
 MAX_LABEL = 50  # maxLength in de OpenAPI-spec / maxLength in the OpenAPI spec
@@ -26,16 +30,77 @@ MAX_LABEL = 50  # maxLength in de OpenAPI-spec / maxLength in the OpenAPI spec
 # iAsset itself uses an invisible character (U+FE0F) as the label of untitled rows (label is required).
 BLANK_LABEL = "\ufe0f"
 
+# NL: Gecontroleerde layout-element-codes (field_type 2) uit een echte GET /templates/tabs.
+# EN: Verified layout element codes (field_type 2) from a real GET /templates/tabs.
+ELEMENT_LINE = 1
+ELEMENT_ROW = 10
+ELEMENT_ACTORS = 11
+ELEMENT_GEOMETRY = 4
+ELEMENT_IASSET_ID = 16
+ELEMENT_MEMO = 19
+ELEMENT_CONNECTED = 18
+ELEMENT_CODES: dict[int, str] = {
+    0: "Text heading", 1: "Horizontale lijn", 2: "Foto", 3: "Extra foto's", 4: "Geometrie", 7: "Archief",
+    10: "Row / section", 11: "Actoren en rollen", 12: "Logboek", 15: "Activiteiten", 16: "iASSET-id",
+    17: "Heeft deel", 18: "Is verbonden met", 19: "Is beschreven door", 20: "Bevat", 21: "Heeft begrenzing",
+    22: "Voert uit", 23: "Bestaat uit", 24: "Speelt", 25: "Heeft betrekking op", 26: "Beginpunt", 27: "Eindpunt",
+}
+RELATION_NAMES: dict[str, int] = {
+    "heeft deel": 17, "is verbonden met": 18, "is beschreven door": 19, "bevat": 20, "heeft begrenzing": 21,
+    "voert uit": 22, "bestaat uit": 23, "speelt": 24, "heeft betrekking op": 25, "beginpunt": 26, "eindpunt": 27,
+}
+# Systeemvelden (field_type 0), op genormaliseerd label. / System fields (field_type 0), by normalised label.
+SYSTEM_FIELDS: dict[str, int] = {"nummer": 1, "naam": 2, "thema": 3, "subthema": 4, "rds coordinaten": 23}
+
+_SEM_SUFFIX = re.compile(r"\s*\((?:sem\.?\s*rel\.?|sem\.?)\)\s*$", re.IGNORECASE)
+_FOOTNOTE_SUFFIX = re.compile(r"\s*\(\d+\)\s*$")
+
+
+def _norm_title(title: str) -> str:
+    return _SEM_SUFFIX.sub("", title.strip()).casefold().strip()
+
+
+def _is_iasset_id(label: str) -> bool:
+    return re.sub(r"[^a-z0-9]", "", label.casefold()) == "iassetid"
+
+
+def _classify(section: Section, profile: DesignProfile | None) -> tuple[int, bool]:
+    """(element-code, aangenomen?) / (element code, assumed?)."""
+    title = _norm_title(section.title)
+    if title.startswith("memo") or title == "is beschreven door":
+        return ELEMENT_MEMO, False
+    if title.startswith("actoren en rollen"):
+        return ELEMENT_ACTORS, False
+    if title == "geometrie":
+        return ELEMENT_GEOMETRY, False
+    if profile:
+        for relation in profile.relations:
+            if _norm_title(relation.title) == title:
+                return relation.element_id, False
+    if title in RELATION_NAMES:
+        return RELATION_NAMES[title], False
+    if section.repeater and "(sem" in section.title.casefold():
+        return ELEMENT_CONNECTED, True
+    return ELEMENT_ROW, False
+
+
+def section_element(section: Section, profile: DesignProfile | None = None) -> int:
+    """Layout-element-code (field_type 2) van een sectie. / Layout element code (field_type 2) of a section."""
+    return _classify(section, profile)[0]
+
 
 @dataclass(frozen=True)
 class PayloadOptions:
-    """Instellingen voor de payload. De type-codes zijn aannames: de OpenAPI-spec noemt alleen de waarden 0, 1, 2.
-    Payload settings. The type codes are assumptions: the OpenAPI spec only lists the values 0, 1, 2."""
+    """Instellingen voor de payload. De standaardcodes zijn gecontroleerd met een echte GET /templates/tabs.
+    Payload settings. The default codes are verified against a real GET /templates/tabs."""
 
     theme_id: int = -1  # -1 = alle thema's / all themes
-    group_field_type: int = 1
-    field_field_type: int = 0
-    group_field_id: int = 0
+    group_field_type: int = 2  # layout-element / layout element
+    field_field_type: int = 1  # diverse veld / diverse field
+    system_field_type: int = 0  # systeemveld (Nummer, Naam, ...) / system field
+    group_field_id: int = ELEMENT_ROW
+    line_field_id: int = ELEMENT_LINE
+    separators: bool = True  # horizontale lijn tussen secties / horizontal line between sections
     order_start: int = 1
     active: bool = True
 
@@ -75,69 +140,101 @@ def build_tab_payload(
         Issue(
             Severity.INFO,
             "assumed-type-codes",
-            f"Assumed codes: row field_type={opts.group_field_type}, field field_type={opts.field_field_type}, "
-            f"row field_id={opts.group_field_id}, order starts at {opts.order_start}. "
-            "The API spec does not document these; verify on a test environment.",
+            f"Codes verified against a real GET /templates/tabs: layout element field_type="
+            f"{opts.group_field_type} (row id {opts.group_field_id}, line id {opts.line_field_id}), diverse field "
+            f"field_type={opts.field_field_type}, system field field_type={opts.system_field_type}, order starts at "
+            f"{opts.order_start}. All are configurable in the payload settings.",
         ),
     ]
     unresolved: set[str] = set()
     ambiguous: set[str] = set()
-    fields: list[dict[str, object]] = []
-    total = resolved = 0
-    order = opts.order_start
-    repeaters: list[str] = []
     questions: set[str] = set()
-    for section in tab.sections:
-        title_pending = True
-        rows = section.rows[:1] if section.repeater else section.rows
-        if section.repeater:
-            repeaters.append(section.title)
-        for row in rows:
-            if not row:
-                continue
-            children: list[dict[str, object]] = []
-            for position, cell in enumerate(row, start=opts.order_start):
-                # sterretjes zijn open vragen in het ontwerp / asterisks are open questions in the design
-                label = cell.label.rstrip("*").strip()
-                if label != cell.label:
-                    questions.add(label)
-                field_id = ids.lookup(label) if ids else None
-                total += 1
-                if field_id is None:
-                    unresolved.add(label)
-                else:
-                    resolved += 1
-                    if ids and ids.is_ambiguous(label):
-                        ambiguous.add(label)
-                children.append(
-                    {
-                        "label": _fit(label, issues, "Field label"),
-                        "field_type": opts.field_field_type,
-                        "field_id": field_id,
-                        "order": position,
-                        "inherit": False,
-                    },
-                )
-            title = _fit(section.title, issues, "Section title") if title_pending else BLANK_LABEL
-            title_pending = False
-            fields.append(
-                {
-                    "label": title,
-                    "field_type": opts.group_field_type,
-                    "field_id": opts.group_field_id,
-                    "order": order,
-                    "inherit": False,
-                    "children": children,
-                },
-            )
-            order += 1
+    counts = {"total": 0, "resolved": 0}
+    assumed_relations: list[str] = []
+    has_iasset_id = False
 
-    if repeaters:
+    def child(cell_label: str, position: int) -> dict[str, object]:
+        label = _FOOTNOTE_SUFFIX.sub("", cell_label.rstrip("*").strip())
+        if cell_label.rstrip().endswith("*"):
+            questions.add(label)
+        counts["total"] += 1
+        system_id = SYSTEM_FIELDS.get(label.casefold().strip())
+        if system_id is not None:
+            counts["resolved"] += 1
+            field_type, field_id = opts.system_field_type, system_id
+        else:
+            field_type = opts.field_field_type
+            field_id = ids.lookup(label) if ids else None
+            if field_id is None:
+                unresolved.add(label)
+            else:
+                counts["resolved"] += 1
+                if ids and ids.is_ambiguous(label):
+                    ambiguous.add(label)
+        return {
+            "label": _fit(label, issues, "Field label"),
+            "field_type": field_type,
+            "field_id": field_id,
+            "order": position,
+            "inherit": False,
+        }
+
+    def element(label: str, element_id: int, children: list[dict[str, object]]) -> dict[str, object]:
+        return {
+            "label": label,
+            "field_type": opts.group_field_type,
+            "field_id": element_id,
+            "inherit": False,
+            "children": children,
+        }
+
+    elements: list[list[dict[str, object]]] = []  # per sectie / per section
+    for section in tab.sections:
+        code, assumed = _classify(section, tab.profile)
+        title = _fit(section.title, issues, "Section title")
+        if code == ELEMENT_ROW:
+            rows: list[list[str]] = []
+            for row in section.rows:
+                labels = [c.label for c in row if c.label.strip() and not set(c.label) <= {ELLIPSIS}]
+                kept = [x for x in labels if not _is_iasset_id(x)]
+                has_iasset_id = has_iasset_id or len(kept) != len(labels)
+                if kept:
+                    rows.append(kept)
+            group: list[dict[str, object]] = []
+            for index, labels in enumerate(rows):
+                row_id = opts.group_field_id
+                item = element(title if index == 0 else BLANK_LABEL, row_id, [])
+                item["children"] = [child(x, n) for n, x in enumerate(labels, start=opts.order_start)]
+                group.append(item)
+            if group:
+                elements.append(group)
+            continue
+        children: list[dict[str, object]] = []
+        if code == ELEMENT_ACTORS:
+            usable = [[c.label for c in r if c.label.strip() and set(c.label) != {ELLIPSIS}] for r in section.rows]
+            labels = next((r for r in usable if r), [])
+            children = [child(x, n) for n, x in enumerate(labels, start=opts.order_start)]
+        if assumed:
+            assumed_relations.append(section.title)
+        elements.append([element(title, code, children)])
+    if has_iasset_id:
+        elements.append([element("iASSET-id", ELEMENT_IASSET_ID, [])])
+
+    fields: list[dict[str, object]] = []
+    for group in elements:
+        if opts.separators and fields:
+            fields.append(element("Horizontale lijn", opts.line_field_id, []))
+        fields.extend(group)
+    for position, item in enumerate(fields, start=opts.order_start):
+        item["order"] = position
+    total, resolved = counts["total"], counts["resolved"]
+
+    if assumed_relations:
         issues.append(
             Issue(
                 Severity.INFO,
-                "repeater-sections",
-                f"Repeating sections sent as one row each (set them to repeat in iAsset): {', '.join(repeaters)}.",
+                "assumed-relation-type",
+                f"Assumed relation type 'Is verbonden met' (18) for: {', '.join(assumed_relations)}.",
             ),
         )
     if questions:

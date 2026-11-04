@@ -77,6 +77,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "mock.search": {"en": "Zoeken op {label}", "nl": "Zoeken op {label}"},
     "mock.no_data": {"en": "No Available Data", "nl": "Geen gegevens beschikbaar"},
     "mock.pager": {"en": "0 to 0 of 0", "nl": "0 tot 0 van 0"},
+    "mock.pager_rows": {"en": "1 to 3 of 3", "nl": "1 tot 3 van 3"},
     "mock.close": {"en": "Close", "nl": "Sluiten"},
     "status.ready": {"en": "Ready.", "nl": "Klaar."},
     "status.checking_ids": {"en": "Checking field IDs…", "nl": "Veld-ID's controleren…"},
@@ -125,13 +126,21 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "error.nothing": {"en": "Open a specification first.", "nl": "Open eerst een specificatie."},
     "settings.title": {"en": "Payload settings", "nl": "Payload-instellingen"},
     "settings.theme_id": {"en": "Theme ID (-1 = all themes)", "nl": "Thema-ID (-1 = alle thema's)"},
-    "settings.group_type": {"en": "field_type of a row", "nl": "field_type van een rij"},
+    "settings.group_type": {"en": "field_type of a layout element", "nl": "field_type van een layout-element"},
     "settings.field_type": {"en": "field_type of a field", "nl": "field_type van een veld"},
     "settings.group_id": {"en": "field_id of a row", "nl": "field_id van een rij"},
+    "settings.system_type": {"en": "field_type of a system field", "nl": "field_type van een systeemveld"},
+    "settings.line_id": {"en": "field_id of a horizontal line", "nl": "field_id van een horizontale lijn"},
+    "settings.separators": {
+        "en": "Horizontal lines between sections",
+        "nl": "Horizontale lijnen tussen secties",
+    },
     "settings.order_start": {"en": "First order number", "nl": "Eerste volgnummer"},
     "settings.note": {
-        "en": "The API spec does not document these codes (field_type is 0, 1 or 2). Verify them on a test system.",
-        "nl": "De API-spec beschrijft deze codes niet (field_type is 0, 1 of 2). Controleer ze op een testomgeving.",
+        "en": "Defaults are verified against a real GET /templates/tabs (0 = system field, 1 = diverse field, "
+        "2 = layout element). Change them only if iAsset differs.",
+        "nl": "Standaardwaarden zijn gecontroleerd met een echte GET /templates/tabs (0 = systeemveld, "
+        "1 = diverse veld, 2 = layout-element). Wijzig ze alleen als iAsset afwijkt.",
     },
     "about.title": {"en": "About", "nl": "Over"},
     "about.text": {
