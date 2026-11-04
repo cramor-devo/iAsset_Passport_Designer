@@ -73,8 +73,15 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "mock.print": {"en": "Print", "nl": "Afdrukken"},
     "mock.more": {"en": "More", "nl": "Meer"},
     "mock.fullscreen": {"en": "Full screen", "nl": "Volledig scherm"},
+    # iAsset toont deze tekst Nederlands / iAsset shows this text in Dutch
+    "mock.search": {"en": "Zoeken op {label}", "nl": "Zoeken op {label}"},
+    "mock.no_data": {"en": "No Available Data", "nl": "Geen gegevens beschikbaar"},
+    "mock.pager": {"en": "0 to 0 of 0", "nl": "0 tot 0 van 0"},
+    "mock.pager_rows": {"en": "1 to 3 of 3", "nl": "1 tot 3 van 3"},
     "mock.close": {"en": "Close", "nl": "Sluiten"},
     "status.ready": {"en": "Ready.", "nl": "Klaar."},
+    "status.checking_ids": {"en": "Checking field IDs…", "nl": "Veld-ID's controleren…"},
+    "status.fixing": {"en": "Repairing annotations…", "nl": "Annotaties herstellen…"},
     "status.loading": {"en": "Loading {name}…", "nl": "{name} laden…"},
     "status.loaded": {
         "en": "Loaded {files} file(s): {filters} filters, {types} object types.",
@@ -119,13 +126,21 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "error.nothing": {"en": "Open a specification first.", "nl": "Open eerst een specificatie."},
     "settings.title": {"en": "Payload settings", "nl": "Payload-instellingen"},
     "settings.theme_id": {"en": "Theme ID (-1 = all themes)", "nl": "Thema-ID (-1 = alle thema's)"},
-    "settings.group_type": {"en": "field_type of a row", "nl": "field_type van een rij"},
+    "settings.group_type": {"en": "field_type of a layout element", "nl": "field_type van een layout-element"},
     "settings.field_type": {"en": "field_type of a field", "nl": "field_type van een veld"},
     "settings.group_id": {"en": "field_id of a row", "nl": "field_id van een rij"},
+    "settings.system_type": {"en": "field_type of a system field", "nl": "field_type van een systeemveld"},
+    "settings.line_id": {"en": "field_id of a horizontal line", "nl": "field_id van een horizontale lijn"},
+    "settings.separators": {
+        "en": "Horizontal lines between sections",
+        "nl": "Horizontale lijnen tussen secties",
+    },
     "settings.order_start": {"en": "First order number", "nl": "Eerste volgnummer"},
     "settings.note": {
-        "en": "The API spec does not document these codes (field_type is 0, 1 or 2). Verify them on a test system.",
-        "nl": "De API-spec beschrijft deze codes niet (field_type is 0, 1 of 2). Controleer ze op een testomgeving.",
+        "en": "Defaults are verified against a real GET /templates/tabs (0 = system field, 1 = diverse field, "
+        "2 = layout element). Change them only if iAsset differs.",
+        "nl": "Standaardwaarden zijn gecontroleerd met een echte GET /templates/tabs (0 = systeemveld, "
+        "1 = diverse veld, 2 = layout-element). Wijzig ze alleen als iAsset afwijkt.",
     },
     "about.title": {"en": "About", "nl": "Over"},
     "about.text": {
@@ -181,7 +196,204 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "merge.previewing": {"en": "Preview of {name} (not applied).", "nl": "Voorbeeld van {name} (niet toegepast)."},
     "merge.applied": {"en": "Merged into {name}.", "nl": "Samengevoegd tot {name}."},
     "merge.reset_done": {"en": "All merges undone.", "nl": "Alle samenvoegingen ongedaan gemaakt."},
+    "action.merge_selected": {"en": "&Merge selected passports…", "nl": "Geselecteerde paspoorten &samenvoegen…"},
+    "merge.selected": {"en": "Merge selected…", "nl": "Selectie samenvoegen…"},
+    "merge.selected_tip": {
+        "en": "Select two or more passports in the list (Ctrl/Shift+click) and merge them, whatever their filter.",
+        "nl": "Selecteer twee of meer paspoorten in de lijst (Ctrl/Shift+klik) en voeg ze samen, ongeacht het filter.",
+    },
+    "merge.imported_disabled": {
+        "en": "Merging is not available for an imported design. Choose 'Back to generated design' first.",
+        "nl": "Samenvoegen kan niet bij een ingelezen ontwerp. Kies eerst 'Terug naar gegenereerd ontwerp'.",
+    },
+    "merge.not_applied": {
+        "en": "Merge '{name}' was not applied: its members are not all available as separate passports.",
+        "nl": "Samenvoeging '{name}' is niet toegepast: niet alle leden zijn als apart paspoort beschikbaar.",
+    },
+    "merge.need_two": {
+        "en": "Select at least two passports in the list first.",
+        "nl": "Selecteer eerst minstens twee paspoorten in de lijst.",
+    },
+    "merge.dialog.title": {"en": "Merge passports", "nl": "Paspoorten samenvoegen"},
+    "merge.dialog.name": {"en": "Name of the combined passport:", "nl": "Naam van het gecombineerde paspoort:"},
+    "merge.dialog.members": {"en": "Passports to merge", "nl": "Samen te voegen paspoorten"},
+    "merge.dialog.col.filter": {"en": "Filter", "nl": "Filter"},
+    "merge.dialog.col.group": {"en": "Management group", "nl": "Beheergroep"},
+    "merge.dialog.col.fit": {"en": "Fit", "nl": "Pasvorm"},
+    "merge.dialog.info": {
+        "en": "Similarity {similarity}%; {common} common fields + {partial} per sub-theme.",
+        "nl": "Gelijkenis {similarity}%; {common} gemeenschappelijke velden + {partial} per subthema.",
+    },
+    "merge.dialog.warn_filters": {
+        "en": "These passports use different filters. Fields that do not apply to every filter get a footnote.",
+        "nl": "Deze paspoorten gebruiken verschillende filters. Velden die niet voor elk filter gelden krijgen een "
+        "voetnoot.",
+    },
+    "merge.dialog.warn_groups": {
+        "en": "WARNING: the passports belong to different management groups ({groups}).",
+        "nl": "LET OP: de paspoorten horen bij verschillende beheergroepen ({groups}).",
+    },
+    "merge.dialog.confirm": {"en": "Merge anyway / Toch samenvoegen", "nl": "Toch samenvoegen / Merge anyway"},
+    "merge.name_empty": {"en": "Enter a name.", "nl": "Vul een naam in."},
+    "merge.name_too_long": {
+        "en": "The name may be at most 50 characters.",
+        "nl": "De naam mag maximaal 50 tekens zijn.",
+    },
+    "merge.name_duplicate": {
+        "en": "A passport with this name already exists.", "nl": "Er bestaat al een paspoort met deze naam.",
+    },
+    "merge.none_group": {"en": "(none)", "nl": "(geen)"},
     "dialog.save_merge": {"en": "Save merge matrix", "nl": "Samenvoegmatrix opslaan"},
+    # --- 0.4.0: veld-ID's, import, vergelijking, annotaties / field IDs, import, cross-reference, annotations ---
+    "action.check_ids": {"en": "Check field I&Ds…", "nl": "Veld-I&D's controleren…"},
+    "action.import_refined": {"en": "&Import refined Excel…", "nl": "Bijgewerkt Excel-ontwerp &importeren…"},
+    "action.back_generated": {"en": "&Back to generated design", "nl": "&Terug naar gegenereerd ontwerp"},
+    "action.check_annotations": {"en": "Check/fix &annotations…", "nl": "&Annotaties controleren/repareren…"},
+    "action.highlight": {"en": "Highlight &changes", "nl": "&Wijzigingen markeren"},
+    "action.highlight_tip": {
+        "en": "Outline fields that differ from the specification in the mockup (off for clean screenshots).",
+        "nl": "Omlijn velden die afwijken van de specificatie in de mockup (uit voor schone screenshots).",
+    },
+    "action.extra_tabs": {"en": "Show extra &mockup tabs", "nl": "Extra &mockup-tabbladen tonen"},
+    "mock.activities": {"en": "Activities", "nl": "Activiteiten"},
+    "idcheck.choose.title": {"en": "Check field IDs", "nl": "Veld-ID's controleren"},
+    "idcheck.choose.text": {
+        "en": "A catalog is already loaded ({name}). Check against it, or compare with a separate catalog file "
+              "(e.g. the iAsset xlsx with subtheme names)?",
+        "nl": "Er is al een catalogus geladen ({name}). Controleren tegen die catalogus, of vergelijken met een "
+              "apart catalogusbestand (bijv. de iAsset-xlsx met subthemanamen)?",
+    },
+    "idcheck.choose.loaded": {"en": "Use loaded catalog", "nl": "Geladen catalogus gebruiken"},
+    "idcheck.choose.other": {"en": "Choose comparison catalog…", "nl": "Vergelijkingscatalogus kiezen…"},
+    "dialog.load_ids_catalog": {
+        "en": "Choose a field catalog or diverse-fields file",
+        "nl": "Kies een veldencatalogus of diverse-fields-bestand",
+    },
+    "dialog.filter_catalog": {
+        "en": "Field catalog (*.xlsx *.json)", "nl": "Veldencatalogus (*.xlsx *.json)",
+    },
+    "dialog.import_refined": {"en": "Import refined Excel design", "nl": "Bijgewerkt Excel-ontwerp importeren"},
+    "dialog.check_annotations": {
+        "en": "Choose the Excel design to check",
+        "nl": "Kies het te controleren Excel-ontwerp",
+    },
+    "dialog.save_id_report": {"en": "Save ID report", "nl": "ID-rapport opslaan"},
+    "status.loading_ids": {"en": "Reading field IDs from {name}…", "nl": "Veld-ID's lezen uit {name}…"},
+    "status.ids_detail": {
+        "en": "{count} field IDs loaded from {name}; subtheme data: {subthemes}.",
+        "nl": "{count} veld-ID's geladen uit {name}; subthemagegevens: {subthemes}.",
+    },
+    "ids.sub_names": {"en": "yes (with names)", "nl": "ja (met namen)"},
+    "ids.sub_ids": {"en": "IDs only, no names", "nl": "alleen ID's, geen namen"},
+    "ids.sub_none": {"en": "none", "nl": "geen"},
+    "idcheck.title": {"en": "Field ID check", "nl": "Veld-ID-controle"},
+    "idcheck.summary": {"en": "{total} fields checked: {text}", "nl": "{total} velden gecontroleerd: {text}"},
+    "idcheck.severity": {"en": "Severity:", "nl": "Ernst:"},
+    "idcheck.status": {"en": "Status:", "nl": "Status:"},
+    "idcheck.all": {"en": "All", "nl": "Alle"},
+    "idcheck.shown": {"en": "{shown} of {total} shown", "nl": "{shown} van {total} getoond"},
+    "idcheck.col.tab": {"en": "Passport", "nl": "Paspoort"},
+    "idcheck.col.section": {"en": "Section", "nl": "Sectie"},
+    "idcheck.col.label": {"en": "Label", "nl": "Label"},
+    "idcheck.col.id": {"en": "ID", "nl": "ID"},
+    "idcheck.col.status": {"en": "Status", "nl": "Status"},
+    "idcheck.col.detail": {"en": "Detail", "nl": "Toelichting"},
+    "idcheck.col.types": {"en": "Object types", "nl": "Objecttypen"},
+    "idcheck.export": {"en": "Export…", "nl": "Exporteren…"},
+    "idcheck.offline": {
+        "en": "Offline check: the app never contacts iAsset.",
+        "nl": "Offline controle: de app maakt nooit verbinding met iAsset.",
+    },
+    "error.read_catalog": {
+        "en": "The field catalog could not be read:\n{detail}",
+        "nl": "De veldencatalogus kon niet worden gelezen:\n{detail}",
+    },
+    "error.read_refined": {
+        "en": "The Excel design could not be read:\n{detail}\n\nDetails are in the log file.",
+        "nl": "Het Excel-ontwerp kon niet worden gelezen:\n{detail}\n\nDetails staan in het logbestand.",
+    },
+    "error.no_sheets": {
+        "en": "No passport design sheets were found in this file.",
+        "nl": "In dit bestand zijn geen paspoortontwerp-bladen gevonden.",
+    },
+    "error.id_check": {
+        "en": "The field IDs could not be checked:\n{detail}",
+        "nl": "De veld-ID's konden niet worden gecontroleerd:\n{detail}",
+    },
+    "annot.warnings": {"en": "Warnings:", "nl": "Waarschuwingen:"},
+    "error.annotations": {
+        "en": "The annotations could not be checked:\n{detail}",
+        "nl": "De annotaties konden niet worden gecontroleerd:\n{detail}",
+    },
+    "error.export_imported_types": {
+        "en": "Export per object type is not available for an imported design. Go back to the generated design first.",
+        "nl": "Exporteren per objecttype is niet beschikbaar voor een geïmporteerd ontwerp. Ga eerst terug naar het "
+        "gegenereerde ontwerp.",
+    },
+    "import.window": {"en": "Imported design: {name}", "nl": "Geïmporteerd ontwerp: {name}"},
+    "import.loading": {"en": "Reading {name}…", "nl": "{name} lezen…"},
+    "import.done": {
+        "en": "Imported {sheets} sheet(s) from {name}; {changes} difference(s) with the specification.",
+        "nl": "{sheets} blad(en) geïmporteerd uit {name}; {changes} verschil(len) met de specificatie.",
+    },
+    "import.done_nospec": {
+        "en": "Imported {sheets} sheet(s) from {name}. Load the specification to cross-reference.",
+        "nl": "{sheets} blad(en) geïmporteerd uit {name}. Laad de specificatie om te vergelijken.",
+    },
+    "import.back_done": {"en": "Back to the generated design.", "nl": "Terug naar het gegenereerde ontwerp."},
+    "tab.crossref": {"en": "Cross-reference", "nl": "Vergelijking"},
+    "xref.not_imported": {
+        "en": "Import a refined Excel design (File → Import refined Excel…) to compare it with the specification.",
+        "nl": "Importeer een bijgewerkt Excel-ontwerp (Bestand → Bijgewerkt Excel-ontwerp importeren…) om het met de "
+        "specificatie te vergelijken.",
+    },
+    "xref.need_spec": {
+        "en": "Load the specification to cross-reference the imported design.",
+        "nl": "Laad de specificatie om het geïmporteerde ontwerp te vergelijken.",
+    },
+    "xref.imported": {"en": "Imported: {name}", "nl": "Geïmporteerd: {name}"},
+    "xref.no_diff": {"en": "No differences", "nl": "Geen verschillen"},
+    "xref.warnings": {"en": "Import warnings", "nl": "Importwaarschuwingen"},
+    "xref.sheet_counts": {"en": "{name} ({counts})", "nl": "{name} ({counts})"},
+    "xref.col.kind": {"en": "Kind", "nl": "Soort"},
+    "xref.col.label": {"en": "Field", "nl": "Veld"},
+    "xref.col.move": {"en": "From → to section", "nl": "Van → naar sectie"},
+    "xref.col.detail": {"en": "Detail", "nl": "Toelichting"},
+    "xref.sections_added": {"en": "New section: {name}", "nl": "Nieuwe sectie: {name}"},
+    "xref.sections_removed": {"en": "Missing section: {name}", "nl": "Ontbrekende sectie: {name}"},
+    "kind.added": {"en": "Added", "nl": "Toegevoegd"},
+    "kind.removed": {"en": "Removed", "nl": "Verwijderd"},
+    "kind.moved": {"en": "Moved", "nl": "Verplaatst"},
+    "kind.renamed": {"en": "Renamed", "nl": "Hernoemd"},
+    "kind.not-in-spec": {"en": "Not in spec", "nl": "Niet in spec"},
+    "annot.title": {"en": "Check annotations", "nl": "Annotaties controleren"},
+    "annot.file": {"en": "File: {path}", "nl": "Bestand: {path}"},
+    "annot.no_spec": {
+        "en": "No specification loaded: only the internal consistency is checked.",
+        "nl": "Geen specificatie geladen: alleen de interne consistentie wordt gecontroleerd.",
+    },
+    "annot.summary": {
+        "en": "{sheets} sheet(s) checked, {issues} issue(s).",
+        "nl": "{sheets} blad(en) gecontroleerd, {issues} probleem/problemen.",
+    },
+    "annot.ok": {"en": "No annotation issues found.", "nl": "Geen annotatieproblemen gevonden."},
+    "annot.col.sheet": {"en": "Sheet", "nl": "Blad"},
+    "annot.col.cell": {"en": "Cell", "nl": "Cel"},
+    "annot.col.kind": {"en": "Kind", "nl": "Soort"},
+    "annot.col.severity": {"en": "Severity", "nl": "Ernst"},
+    "annot.col.detail": {"en": "Detail", "nl": "Toelichting"},
+    "annot.fix": {"en": "Fix → _fixed.xlsx", "nl": "Repareren → _fixed.xlsx"},
+    "annot.fix_tip": {
+        "en": "Renumbers footnotes and rewrites the remarks into a copy; the original is left untouched.",
+        "nl": "Nummert voetnoten opnieuw en schrijft de opmerkingen in een kopie; het origineel blijft ongemoeid.",
+    },
+    "annot.fixed": {"en": "Fixed copy written to: {path}", "nl": "Gerepareerde kopie opgeslagen als: {path}"},
+    "annot.changes": {"en": "{count} change(s):", "nl": "{count} wijziging(en):"},
+    "annot.after": {
+        "en": "After the fix: {issues} issue(s) left.",
+        "nl": "Na de reparatie: nog {issues} probleem/problemen.",
+    },
+    "annot.fix_failed": {"en": "The fix failed:\n{detail}", "nl": "De reparatie is mislukt:\n{detail}"},
 }
 
 LANGUAGES: dict[str, str] = {"en": "English", "nl": "Nederlands"}

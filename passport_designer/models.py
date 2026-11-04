@@ -39,6 +39,16 @@ class ObjectType:
 
 
 @dataclass
+class RawSheet:
+    """Ongewijzigde kopie van een specificatieblad (kopregel + rijen) uit één bronbestand.
+    Unmodified copy of a specification sheet (header row + rows) from one source file."""
+
+    source: str
+    header: list[str]
+    rows: list[tuple[object, ...]] = field(default_factory=list)
+
+
+@dataclass
 class SpecModel:
     """Ingelezen specificatie: objecttypen en hun attributen. / Loaded specification: object types and attributes."""
 
@@ -54,6 +64,9 @@ class SpecModel:
     # first available of Filter/Zoekfilter/Fase at read time).
     columns: list[str] = field(default_factory=list)
     filter_column: str = ""
+    # Ruwe bladen per bron, sleutel 'objecttypen' of 'attributen' (leeg bij een in het geheugen opgebouwde spec).
+    # Raw sheets per source, key 'objecttypen' or 'attributen' (empty for a spec built in memory).
+    raw_sheets: dict[str, list[RawSheet]] = field(default_factory=dict)
 
     def filters(self) -> dict[str, list[ObjectType]]:
         """Objecttypen per filter (waarde in de gekozen filterkolom), in volgorde van voorkomen.
@@ -94,6 +107,10 @@ class SpecModel:
         for name, names in other.excluded.items():
             self.excluded.setdefault(name, set()).update(names)
         self.sources.extend(s for s in other.sources if s not in self.sources)
+        for key, sheets in other.raw_sheets.items():
+            target_sheets = self.raw_sheets.setdefault(key, [])
+            known_sources = {sheet.source for sheet in target_sheets}
+            target_sheets.extend(sheet for sheet in sheets if sheet.source not in known_sources)
 
 
 class SectionStyle(Enum):

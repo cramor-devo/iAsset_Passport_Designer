@@ -11,7 +11,7 @@ def test_export_creates_one_sheet_per_filter_with_styling(tmp_path, wave1_spec):
     tabs = LayoutEngine(wave1_spec, LayoutOptions(profile=LEGACY)).build_all()
     target = export_workbook(tabs, tmp_path / "out.xlsx")
     workbook = load_workbook(target)
-    assert workbook.sheetnames == ["Bord", "Verharding"]
+    assert workbook.sheetnames == ["Bord", "Verharding", "_designer"]
     sheet = workbook["Bord"]
     assert sheet["A1"].value == "Basis" and sheet["A1"].font.b
     assert sheet["A1"].fill.fgColor.rgb.endswith(GREY)
@@ -49,9 +49,19 @@ def test_export_per_object_type_hides_fields_that_do_not_apply(tmp_path, wave1_s
     singles = [engine.build_single(tab, o.name) for o in tab.object_types]
     target = export_workbook(singles, tmp_path / "types.xlsx", [o.name for o in tab.object_types])
     workbook = load_workbook(target)
-    assert workbook.sheetnames == ["APV-bord", "Verkeersbord"]
+    assert workbook.sheetnames == ["APV-bord", "Verkeersbord", "_designer"]
     values = {str(c.value) for row in workbook["Verkeersbord"].iter_rows() for c in row if c.value}
     assert "Objecttypes: Verkeersbord" in values
     assert not any(v.startswith("APV-verordening") for v in values)
     assert not any(v.startswith("(1) Objecttype") for v in values)
     assert "APV-verordening" in {str(c.value) for row in workbook["APV-bord"].iter_rows() for c in row}
+
+
+def test_per_object_type_export_with_spec_adds_reference_sheets(tmp_path, wave1_spec):
+    engine = LayoutEngine(wave1_spec)
+    tab = engine.build_all()[0]
+    singles = [engine.build_single(tab, o.name) for o in tab.object_types]
+    target = export_workbook(singles, tmp_path / "t.xlsx", [o.name for o in tab.object_types], spec=wave1_spec)
+    workbook = load_workbook(target)
+    assert workbook.sheetnames == ["APV-bord", "Verkeersbord", "Bron Objecttypen", "Bron Attributen", "_designer"]
+    assert workbook["_designer"].sheet_state == "hidden"

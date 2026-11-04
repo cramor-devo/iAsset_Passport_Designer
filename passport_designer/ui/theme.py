@@ -22,18 +22,24 @@ class Palette:
     border: str
     button_bg: str
     panel_bg: str
+    separator: str
 
 
 DARK = Palette(
-    name="dark", window="#2b2b2f", frame="#3c3c40", title_bar="#4a4a4f", body="#6b6b6d", header_band="#38383d",
-    input_bg="#58585c", text="#ffffff", muted="#c9c9cd", accent="#4da3ff", semantic="#d4c8f2", border="#8a8a8e",
-    button_bg="#d9d9dc", panel_bg="#3a3a3f",
+    name="dark", window="#2b2b2f", frame="#3c3c40", title_bar="#3c3c40", body="#68686a", header_band="#3c3c40",
+    input_bg="#4b4b50", text="#ffffff", muted="#d0d0d4", accent="#4da3ff", semantic="#d4c8f2", border="#8a8a8e",
+    button_bg="#e4e4e7", panel_bg="#3a3a3f", separator="#8f9094",
 )
 LIGHT = Palette(
     name="light", window="#eef0f4", frame="#dfe3ea", title_bar="#ffffff", body="#f5f6f8", header_band="#dde2ea",
     input_bg="#ffffff", text="#1d2433", muted="#556070", accent="#1a73e8", semantic="#5b3fa0", border="#c4cad6",
-    button_bg="#e8ebf1", panel_bg="#ffffff",
+    button_bg="#e8ebf1", panel_bg="#ffffff", separator="#c4cad6",
 )
+
+# Kleur per soort verschil in de mockup (zie crossref). / Colour per kind of difference in the mockup.
+KIND_COLOURS: dict[str, str] = {
+    "added": "#2fa84f", "moved": "#f0a500", "renamed": "#3b82f6", "not-in-spec": "#e5484d", "removed": "#8a8a8e",
+}
 
 PALETTES: dict[str, Palette] = {DARK.name: DARK, LIGHT.name: LIGHT}
 

@@ -49,6 +49,7 @@ class RelationSection:
     repeat: int = 1
     repeater: bool = False
     remarks: tuple[tuple[int, str], ...] = ()
+    element_id: int = 18  # iAsset-relatietype (18 = Is verbonden met) / iAsset relation type
 
 
 @dataclass(frozen=True)
@@ -68,6 +69,14 @@ class DesignProfile:
     basis_remark: str = ""
     basis_group_annotation: bool = True  # 'Beheergroep (Borden)' / 'Beheergroep (Borden)'
     relations: tuple[RelationSection, ...] = field(default=())
+    # Titelvoorvoegsels van secties die iAsset als gekoppeld-objectentabel toont (bijv. 'Memo (Sem.Rel)').
+    # Title prefixes of sections that iAsset shows as a linked-object table (e.g. 'Memo (Sem.Rel)').
+    table_sections: tuple[str, ...] = ("Memo",)
+
+    def is_table_section(self, title: str) -> bool:
+        """Toont iAsset deze sectie als tabel i.p.v. kolomkoppen? / Does iAsset show this section as a table?"""
+        lowered = title.casefold().strip()
+        return any(lowered.startswith(prefix.casefold()) for prefix in self.table_sections)
 
     @property
     def fixed_names(self) -> frozenset[str]:
@@ -131,6 +140,7 @@ def load_relations(path: Path = RELATIONS_FILE) -> tuple[RelationSection, ...]:
                 repeat=int(item.get("repeat", 1)),
                 repeater=bool(item.get("repeater", False)),
                 remarks=tuple((int(k), v) for k, v in item.get("remarks", {}).items()),
+                element_id=int(item.get("element", 18)),
             ),
         )
     return tuple(result)

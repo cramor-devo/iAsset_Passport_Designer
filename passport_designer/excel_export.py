@@ -3,26 +3,46 @@ Exports passport designs to an Excel design file (one sheet per filter) with ope
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
+from datetime import date, datetime
 from pathlib import Path
+from typing import Any
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
-from .layout_engine import notes_section
+from . import __version__
+from .layout_engine import LayoutEngine, notes_section
 from .merge_advisor import MergeSuggestion, field_matrix
-from .models import PassportTab, Section, SectionStyle
+from .models import PassportTab, RawSheet, Section, SectionStyle, SpecModel, norm
 
 GREY = "D9D9D9"
 PURPLE = "D9D2E9"
 COLUMN_WIDTH = 30
 MARGIN_WIDTH = 70
+METADATA_SHEET = "_designer"
+REFERENCE_SHEETS = {"objecttypen": "Bron Objecttypen", "attributen": "Bron Attributen"}
+METADATA_FORMAT = "1"
 INVALID_SHEET_CHARS = re.compile(r"[\[\]:*?/\\]")
 BOLD = Font(bold=True)
 WRAP_TOP = Alignment(wrap_text=True, vertical="top")
+
+
+def find_metadata_sheet(workbook: Any) -> str | None:
+    """Naam van het verborgen metadatablad: bij voorkeur '_designer', anders een blad dat er qua kop uitziet
+    (kop key/value, daarna 'format'). Name of the hidden metadata sheet: preferably '_designer', otherwise a sheet
+    with the metadata header (key/value, then 'format')."""
+    names = sorted(workbook.sheetnames, key=lambda n: norm(n) != METADATA_SHEET)
+    for name in names:
+        rows = list(workbook[name].iter_rows(min_row=1, max_row=2, max_col=2, values_only=True))
+        head = [tuple(str(v).strip().casefold() if v is not None else "" for v in row) for row in rows]
+        if len(head) == 2 and head[0] == ("key", "value") and head[1][0] == "format":
+            return str(name)
+    return None
 
 
 def sheet_title(name: str, used: set[str]) -> str:
@@ -135,9 +155,132 @@ def write_tab(sheet: Worksheet, tab: PassportTab) -> None:
         sheet.column_dimensions[get_column_letter(column)].width = width
 
 
-def export_workbook(tabs: list[PassportTab], path: str | Path, sheet_names: list[str] | None = None) -> Path:
+def _union_columns(sheets: list[RawSheet]) -> list[tuple[str, int]]:
+    """Unie van de kopnamen van alle bronnen in volgorde van voorkomen; (kopnaam, n-de keer) houdt dubbele kopnamen
+    (GUID, GUID) uit elkaar. / Union of the headers of all sources in order of appearance; (header, n-th occurrence)
+    keeps duplicate headers (GUID, GUID) apart."""
+    columns: list[tuple[str, int]] = []
+    for sheet in sheets:
+        seen: dict[str, int] = {}
+        for name in sheet.header:
+            key = norm(name)
+            seen[key] = seen.get(key, 0) + 1
+            if (key, seen[key]) not in columns:
+                columns.append((key, seen[key]))
+    return columns
+
+
+def _reference_sheet(
+    workbook: Workbook, title: str, sheets: list[RawSheet], object_types: set[str], today: str,
+) -> None:
+    """Ruwe kopie van een bronblad, gefilterd op de geëxporteerde objecttypen, met bron en exportdatum erboven.
+    Raw copy of a source sheet, filtered to the exported object types, with source and export date above."""
+    sheet = workbook.create_sheet(title)
+    multiple = len(sheets) > 1
+    sources = ", ".join(s.source for s in sheets)
+    sheet.cell(row=1, column=1, value=f"Bron: {sources} | Exportdatum: {today}").font = Font(italic=True)
+    columns = _union_columns(sheets)
+    names: dict[tuple[str, int], str] = {}
+    for source_sheet in sheets:
+        seen: dict[str, int] = {}
+        for name in source_sheet.header:
+            key = norm(name)
+            seen[key] = seen.get(key, 0) + 1
+            names.setdefault((key, seen[key]), name)
+    offset = 1 if multiple else 0
+    header_row = 3
+    if multiple:
+        sheet.cell(row=header_row, column=1, value="Bron")
+    for index, column in enumerate(columns, start=1 + offset):
+        sheet.cell(row=header_row, column=index, value=names[column] or None)
+    for cell in sheet[header_row]:
+        cell.font, cell.fill = BOLD, PatternFill("solid", fgColor=GREY)
+    row_number = header_row + 1
+    for source_sheet in sheets:
+        type_index = next((i for i, h in enumerate(source_sheet.header) if norm(h) == "objecttype"), None)
+        if type_index is None:
+            continue
+        positions: dict[tuple[str, int], int] = {}
+        seen: dict[str, int] = {}
+        for position, name in enumerate(source_sheet.header):
+            key = norm(name)
+            seen[key] = seen.get(key, 0) + 1
+            positions[(key, seen[key])] = position
+        for row in source_sheet.rows:
+            if norm(str(row[type_index] or "")) not in object_types:
+                continue
+            if multiple:
+                sheet.cell(row=row_number, column=1, value=source_sheet.source)
+            for index, column in enumerate(columns, start=1 + offset):
+                position = positions.get(column)
+                if position is not None and row[position] is not None:
+                    sheet.cell(row=row_number, column=index, value=row[position])
+            row_number += 1
+    sheet.freeze_panes = sheet.cell(row=header_row + 1, column=1)
+    for index in range(1, len(columns) + offset + 1):
+        sheet.column_dimensions[get_column_letter(index)].width = 24
+
+
+def add_reference_sheets(workbook: Workbook, spec: SpecModel, tabs: list[PassportTab], used: set[str]) -> list[str]:
+    """Voeg 'Bron Objecttypen' en 'Bron Attributen' toe (ruwe kopie van de spec, gefilterd op de objecttypen van
+    ``tabs``). Zonder ruwe gegevens in ``spec`` gebeurt er niets. Geeft de toegevoegde bladnamen terug.
+    Add 'Bron Objecttypen' and 'Bron Attributen' (raw copy of the spec, filtered to the object types of ``tabs``).
+    Does nothing when ``spec`` has no raw data. Returns the names of the added sheets."""
+    object_types = {norm(o.name) for tab in tabs for o in tab.object_types}
+    engine = LayoutEngine(spec)
+    # Objecttypen zonder eigen attributen erven van een bronobjecttype; die attribuutrijen horen er ook bij.
+    # Object types without own attributes inherit from a source type; those attribute rows belong too.
+    with_sources = object_types | {norm(engine._source_type(o.name)) for tab in tabs for o in tab.object_types}
+    today = date.today().isoformat()
+    added: list[str] = []
+    for key, title in REFERENCE_SHEETS.items():
+        sheets = spec.raw_sheets.get(key, [])
+        if not sheets:
+            continue
+        name = sheet_title(title, used)
+        _reference_sheet(workbook, name, sheets, with_sources if key == "attributen" else object_types, today)
+        added.append(name)
+    return added
+
+
+def write_metadata(
+    workbook: Workbook, tabs: list[PassportTab], titles: list[str], spec: SpecModel | None, used: set[str],
+    reference_sheets: list[str] | None = None,
+) -> None:
+    """Verborgen blad '_designer' met sleutel/waarde-regels (versie, profiel, bronnen, filterkolom en per ontwerpblad
+    de objecttypen, samenvoeging en voetnoten als JSON). Hidden '_designer' sheet with key/value rows (version,
+    profile, sources, filter column and per design sheet the object types, merge and footnotes as JSON)."""
+    sheet = workbook.create_sheet(sheet_title(METADATA_SHEET, used))
+    sheet.append(["key", "value"])
+    sheet.append(["format", METADATA_FORMAT])
+    sheet.append(["metadata_sheet", sheet.title])
+    sheet.append(["reference_sheets", json.dumps(reference_sheets or [], ensure_ascii=False)])
+    sheet.append(["app_version", __version__])
+    sheet.append(["profile", tabs[0].profile.key])
+    sheet.append(["sources", json.dumps(spec.sources if spec else [], ensure_ascii=False)])
+    sheet.append(["filter_column", spec.filter_column if spec else ""])
+    sheet.append(["generated", datetime.now().isoformat(timespec="seconds")])
+    for title, tab in zip(titles, tabs, strict=True):
+        info = {
+            "tab": tab.name,
+            "object_types": [o.name for o in tab.object_types],
+            "merged_from": list(tab.merged_from),
+            "footnotes": {str(n): list(names) for n, names in sorted(tab.footnotes.items())},
+        }
+        sheet.append([f"sheet:{title}", json.dumps(info, ensure_ascii=False)])
+    sheet.column_dimensions["A"].width = 28
+    sheet.column_dimensions["B"].width = 100
+    sheet.sheet_state = "hidden"
+
+
+def export_workbook(
+    tabs: list[PassportTab], path: str | Path, sheet_names: list[str] | None = None, spec: SpecModel | None = None,
+) -> Path:
     """Schrijf alle ontwerpen naar één xlsx-bestand; ``sheet_names`` vervangt desgewenst de tabbladnamen (bijv. per
-    objecttype). / Write all designs to one xlsx file; ``sheet_names`` optionally replaces the sheet names."""
+    objecttype). Met ``spec`` komen er bronbladen bij ('Bron Objecttypen', 'Bron Attributen'); altijd komt er een
+    verborgen blad '_designer' met metadata bij.
+    Write all designs to one xlsx file; ``sheet_names`` optionally replaces the sheet names. With ``spec`` the
+    reference sheets ('Bron Objecttypen', 'Bron Attributen') are added; a hidden '_designer' sheet always is."""
     if not tabs:
         raise ValueError("No passport designs to export.")
     workbook = Workbook()
@@ -145,9 +288,16 @@ def export_workbook(tabs: list[PassportTab], path: str | Path, sheet_names: list
     if default_sheet is not None:
         workbook.remove(default_sheet)
     used: set[str] = set()
+    references: list[str] = []
     names = sheet_names if sheet_names is not None and len(sheet_names) == len(tabs) else [t.name for t in tabs]
+    titles: list[str] = []
     for tab, name in zip(tabs, names, strict=True):
-        write_tab(workbook.create_sheet(sheet_title(name, used)), tab)
+        sheet = workbook.create_sheet(sheet_title(name, used))
+        titles.append(sheet.title)
+        write_tab(sheet, tab)
+    if spec is not None:
+        references = add_reference_sheets(workbook, spec, tabs, used)
+    write_metadata(workbook, tabs, titles, spec, used, references)
     target = Path(path)
     workbook.save(target)
     return target

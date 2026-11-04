@@ -11,7 +11,9 @@ from passport_designer.merge_advisor import (
     apply_merges,
     field_matrix,
     jaccard,
+    manual_merge_info,
     suggest_merges,
+    validate_merge_name,
 )
 from passport_designer.models import SpecModel  # noqa: F401
 
@@ -81,3 +83,32 @@ def test_merge_report_has_summary_and_matrix(tmp_path):
     assert rows["APV-verordening"][1] == "Nee"
     assert rows["APV-verordening"][2 + header[2:].index("APV-bord")] == "✓"
     assert os.path.getsize(target) > 0
+
+
+def test_validate_merge_name():
+    assert validate_merge_name("", {"Bord"}) == "merge.name_empty"
+    assert validate_merge_name("   ", set()) == "merge.name_empty"
+    assert validate_merge_name("x" * 51, set()) == "merge.name_too_long"
+    assert validate_merge_name("bord", {"Bord"}) == "merge.name_duplicate"
+    assert validate_merge_name("x" * 50, {"Bord"}) is None
+    assert validate_merge_name("Nieuw", {"Bord"}) is None
+
+
+def test_manual_merge_info_across_groups():
+    spec = make_spec()
+    engine = LayoutEngine(spec)
+    info = manual_merge_info(spec, engine, ["Bord", "Paal"], {"paal"})
+    assert info.members == ["Bord", "Paal"] and info.groups == {"Bord": "Borden", "Paal": "Meubilair"}
+    assert info.groups_differ and info.needs_confirmation
+    assert info.name.casefold() != "paal" and 0 <= info.similarity <= 1
+    assert [f.filter for f in info.fits] == ["Bord", "Paal"] and info.total_fields >= info.partial_fields
+    same = manual_merge_info(spec, engine, ["Bord", "Informatiebord"], set())
+    assert not same.groups_differ and same.partial_fields == 3 and same.name == "Borden"
+
+
+def test_apply_merges_with_members_from_different_groups():
+    spec = make_spec()
+    engine = LayoutEngine(spec)
+    tabs = apply_merges(spec, engine, engine.build_all(), [("Mix", ["Bord", "Paal"])])
+    assert [t.name for t in tabs] == ["Mix", "Informatiebord", "Verharding"]
+    assert tabs[0].merged_from == ["Bord", "Paal"]

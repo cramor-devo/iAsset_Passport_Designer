@@ -19,14 +19,16 @@ def make_wave1(path: Path) -> Path:
     types.title = "Objecttypen"
     types.append(["Objecttypen implementatie"])
     types.append(["2026-09-25"])
-    types.append(["Objecttype", "GUID", "URI", "Informatiemodel", "Filter", "Groep", "Fase", "Geometrietype"])
-    types.append(["APV-bord", "g", "u", "IMBOR", "Bord", "Borden", "Wave 1", "Point"])
-    types.append(["Verkeersbord", "g", "u", "IMBOR", "Bord", "Borden", "Wave 1", "Point"])
-    types.append(["Asfaltverharding", "g", "u", "IMBOR", "Verharding", "Wegen", "Wave 1", "Surface"])
+    types.append(
+        ["Objecttype", "GUID", "URI", "Informatiemodel", "Filter", "Groep", "Fase", "Geometrietype", "Definitie"],
+    )
+    types.append(["APV-bord", "g", "u", "IMBOR", "Bord", "Borden", "Wave 1", "Point", "def apv"])
+    types.append(["Verkeersbord", "g", "u", "IMBOR", "Bord", "Borden", "Wave 1", "Point", "def vb"])
+    types.append(["Asfaltverharding", "g", "u", "IMBOR", "Verharding", "Wegen", "Wave 1", "Surface", "def asfalt"])
     attrs = workbook.create_sheet("Attributen")
     attrs.append(["Paspoortgegevens"])
     attrs.append([])
-    attrs.append(["Objecttype", "GUID", "Attribuut", "GUID", "In paspoort tonen"])
+    attrs.append(["Objecttype", "GUID", "Attribuut", "GUID", "In paspoort tonen", "Toelichting"])
     rows = [
         ("APV-bord", "domein", "Ja"),
         ("APV-bord", "identificatie", "Ja"),
@@ -46,7 +48,7 @@ def make_wave1(path: Path) -> Path:
         ("Asfaltverharding", "dikte", "Ja"),
     ]
     for type_name, attribute, flag in rows:
-        attrs.append([type_name, "g", attribute, "g", flag])
+        attrs.append([type_name, "g", attribute, "g", flag, f"uitleg {attribute}"])
     workbook.save(path)
     return path
 

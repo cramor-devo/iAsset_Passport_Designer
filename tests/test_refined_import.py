@@ -1,0 +1,328 @@
+"""Tests voor de bronbladen, metadata en het terugdraaien (import) van ontwerpen. Alles offline.
+Tests for reference sheets, metadata and the round trip (import) of designs. Everything offline."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+from openpyxl import load_workbook
+
+from passport_designer.crossref import diff_workbook, label_key
+from passport_designer.excel_export import export_workbook
+from passport_designer.layout_engine import LayoutEngine, LayoutOptions
+from passport_designer.merge_advisor import merged_tab
+from passport_designer.models import SpecModel
+from passport_designer.profiles import LEGACY
+from passport_designer.refined_import import read_metadata, read_refined, split_label
+from passport_designer.spec_reader import read_spec
+
+
+@pytest.fixture
+def exported(tmp_path, wave1_spec) -> Path:
+    tabs = LayoutEngine(wave1_spec).build_all()
+    return export_workbook(tabs, tmp_path / "out.xlsx", spec=wave1_spec)
+
+
+def test_reference_sheets_are_raw_and_filtered(exported):
+    workbook = load_workbook(exported)
+    assert workbook.sheetnames == ["Bord", "Verharding", "Bron Objecttypen", "Bron Attributen", "_designer"]
+    types = workbook["Bron Objecttypen"]
+    assert str(types["A1"].value).startswith("Bron: wave1.xlsx | Exportdatum: 20")
+    header = [c.value for c in types[3]]
+    assert header[:2] == ["Objecttype", "GUID"] and header[-2:] == ["Geometrietype", "Definitie"]
+    assert [r[0].value for r in types.iter_rows(min_row=4)] == ["APV-bord", "Verkeersbord", "Asfaltverharding"]
+    attrs = workbook["Bron Attributen"]
+    assert [c.value for c in attrs[3]][-1] == "Toelichting"
+    rows = [[c.value for c in r] for r in attrs.iter_rows(min_row=4)]
+    assert ["APV-bord", "g", "geheim", "g", "Nee", "uitleg geheim"] in rows
+    assert {str(r[0]) for r in rows} <= {"APV-bord", "Verkeersbord", "Asfaltverharding"}
+
+
+def test_reference_sheets_are_filtered_to_exported_object_types(tmp_path, wave1_spec):
+    engine = LayoutEngine(wave1_spec)
+    tab = engine.build_all()[0]
+    single = engine.build_single(tab, "Verkeersbord")
+    target = export_workbook([single], tmp_path / "one.xlsx", spec=wave1_spec)
+    workbook = load_workbook(target)
+    types = {str(r[0].value) for r in workbook["Bron Objecttypen"].iter_rows(min_row=4)}
+    attrs = {str(r[0].value) for r in workbook["Bron Attributen"].iter_rows(min_row=4)}
+    assert types == attrs == {"Verkeersbord"}
+
+
+def test_merged_specs_get_bron_column_and_header_union(tmp_path, wave1_file, wave2_file):
+    spec = read_spec(wave1_file)
+    spec.merge(read_spec(wave2_file))
+    spec.merge(read_spec(wave2_file))
+    assert len(spec.raw_sheets["objecttypen"]) == 2
+    tab = LayoutEngine(spec).build_all()[0]
+    other = next(t for t in LayoutEngine(spec).build_all() if t.name == "RD-Obsurv")
+    target = export_workbook([tab, other], tmp_path / "m.xlsx", spec=spec)
+    sheet = load_workbook(target)["Bron Objecttypen"]
+    assert "wave1.xlsx" in str(sheet["A1"].value) and "wave2.xlsx" in str(sheet["A1"].value)
+    header = [c.value for c in sheet[3]]
+    assert header[0] == "Bron" and "Organisatie" in header and "Definitie" in header
+    sources = {str(r[0].value) for r in sheet.iter_rows(min_row=4)}
+    assert sources == {"wave1.xlsx", "wave2.xlsx"}
+
+
+def test_spec_without_raw_data_skips_reference_sheets(tmp_path):
+    from tests.conftest import make_spec
+
+    spec = make_spec()
+    tabs = LayoutEngine(spec).build_all()
+    target = export_workbook(tabs, tmp_path / "x.xlsx", spec=spec)
+    assert load_workbook(target).sheetnames[-1] == "_designer"
+    assert not any(n.startswith("Bron") for n in load_workbook(target).sheetnames)
+
+
+def test_metadata_sheet_is_hidden_and_complete(exported):
+    sheet = load_workbook(exported)["_designer"]
+    assert sheet.sheet_state == "hidden"
+    meta = read_metadata(exported)
+    assert meta is not None
+    assert meta["app_version"] and meta["profile"] == "rotterdam_v3" and meta["sources"] == ["wave1.xlsx"]
+    info = meta["sheets"]["Bord"]
+    assert info["object_types"] == ["APV-bord", "Verkeersbord"] and info["tab"] == "Bord"
+    assert info["footnotes"] == {1: ["APV-bord"]}
+    raw = next(str(r[1]) for r in sheet.iter_rows(values_only=True) if r[0] == "sheet:Bord")
+    assert json.loads(raw)["merged_from"] == []
+
+
+def test_split_label():
+    assert split_label("breedte (3)") == ("breedte", 3)
+    assert split_label("  breedte*  ") == ("breedte", None)
+    assert split_label("breedte (3)*") == ("breedte", 3)
+    assert split_label("Beheergroep (Borden)") == ("Beheergroep (Borden)", None)
+
+
+def _assert_round_trip(path: Path, spec: SpecModel, engine: LayoutEngine, tabs) -> None:
+    refined = read_refined(path, spec)
+    assert [s.name for s in refined.sheets] == [t.name for t in tabs]
+    for sheet, tab in zip(refined.sheets, tabs, strict=True):
+        assert sheet.tab.footnotes == tab.footnotes
+        assert [o.name for o in sheet.tab.object_types] == [o.name for o in tab.object_types]
+        assert [s.title for s in sheet.tab.sections] == [s.title for s in tab.sections]
+        assert [[label_key(c.display) for c in r] for s in sheet.tab.sections for r in s.rows] == [
+            [label_key(c.display) for c in r] for s in tab.sections for r in s.rows
+        ]
+    assert not refined.warnings
+    for name, diff in diff_workbook(refined, spec, engine):
+        assert diff.is_empty, (name, diff)
+
+
+def test_round_trip_with_metadata(exported, wave1_spec):
+    tabs = LayoutEngine(wave1_spec).build_all()
+    _assert_round_trip(exported, wave1_spec, LayoutEngine(wave1_spec), tabs)
+    refined = read_refined(exported, wave1_spec)
+    assert refined.metadata is not None and len(refined.sheets[0].column_widths) == 5
+    assert refined.sheets[0].column_widths[0] == 30 and refined.sheets[0].margin_width == 70
+    first = refined.sheets[0]
+    assert first.positions[(0, 0, 0)] == (5, 1) and first.heading_rows[0] == 4
+
+
+def test_round_trip_without_metadata(tmp_path, exported, wave1_spec):
+    workbook = load_workbook(exported)
+    del workbook["_designer"]
+    path = tmp_path / "nometa.xlsx"
+    workbook.save(path)
+    tabs = LayoutEngine(wave1_spec).build_all()
+    refined = read_refined(path, wave1_spec)
+    assert refined.metadata is None
+    _assert_round_trip(path, wave1_spec, LayoutEngine(wave1_spec), tabs)
+
+
+def test_round_trip_legacy_profile(tmp_path, wave1_spec):
+    engine = LayoutEngine(wave1_spec, LayoutOptions(profile=LEGACY))
+    tabs = engine.build_all()
+    path = export_workbook(tabs, tmp_path / "legacy.xlsx", spec=wave1_spec)
+    _assert_round_trip(path, wave1_spec, engine, tabs)
+    workbook = load_workbook(path)
+    del workbook["_designer"]
+    workbook.save(tmp_path / "legacy2.xlsx")
+    refined = read_refined(tmp_path / "legacy2.xlsx", wave1_spec)
+    assert refined.sheets[0].tab.footnotes == tabs[0].footnotes
+    assert refined.sheets[0].tab.profile is LEGACY
+
+
+def test_round_trip_merged_tab_uses_metadata(tmp_path, wave1_spec):
+    engine = LayoutEngine(wave1_spec)
+    tab = merged_tab(wave1_spec, engine, ["Bord", "Verharding"], "Combi")
+    path = export_workbook([tab], tmp_path / "merged.xlsx", spec=wave1_spec)
+    refined = read_refined(path, wave1_spec)
+    assert refined.sheets[0].tab.merged_from == ["Bord", "Verharding"]
+    _assert_round_trip(path, wave1_spec, engine, [tab])
+
+
+def test_unknown_object_type_and_foreign_sheets_warn(tmp_path, exported, wave1_spec):
+    workbook = load_workbook(exported)
+    workbook["Bord"]["A2"] = "Objecttypes: APV-bord, Spook"
+    other = workbook.create_sheet("Notities")
+    other["A1"] = "gewoon een blad"
+    path = tmp_path / "w.xlsx"
+    workbook.save(path)
+    refined = read_refined(path, wave1_spec)
+    assert any("'Spook'" in w for w in refined.sheets[0].warnings)
+    assert [o.name for o in refined.sheets[0].tab.object_types] == ["APV-bord", "Spook"]
+    assert any("Notities" in w for w in refined.warnings)
+    assert "Bron Objecttypen" not in [s.name for s in refined.sheets]
+
+
+def test_sheet_without_margin_column_and_odd_rows(tmp_path, exported, wave1_spec):
+    workbook = load_workbook(exported)
+    sheet = workbook["Bord"]
+    for row in sheet.iter_rows(min_col=7, max_col=7):
+        row[0].value = None
+    sheet["B5"] = None  # rij met minder cellen / row with fewer cells
+    sheet["A100"] = "extra*"  # extra veld onderaan de laatste sectie / extra field at the end of the last section
+    path = tmp_path / "odd.xlsx"
+    workbook.save(path)
+    refined = read_refined(path, wave1_spec)
+    bord = refined.sheets[0]
+    assert bord.margin_column is None and any("Opmerkingen" in w for w in bord.warnings)
+    assert [c.label for c in bord.tab.sections[0].rows[0]] == ["Nummer", "IMBOR Filter*", "Thema", "Subthema"]
+    assert bord.tab.sections[-1].rows[-1][0].label == "extra*"
+
+
+def _combi(tmp_path, wave1_spec) -> Path:
+    tab = merged_tab(wave1_spec, LayoutEngine(wave1_spec), ["Bord", "Verharding"], "Combi")
+    return export_workbook([tab], tmp_path / "combi.xlsx", spec=wave1_spec)
+
+
+def test_renamed_sheet_keeps_metadata_via_tab_name(tmp_path, wave1_spec):
+    path = _combi(tmp_path, wave1_spec)
+    workbook = load_workbook(path)
+    workbook["Combi"].title = "Mijn blad"
+    workbook.save(path)
+    sheet = read_refined(path, wave1_spec).sheets[0]
+    assert sheet.name == "Mijn blad" and sheet.tab.merged_from == ["Bord", "Verharding"]
+    assert sheet.meta_key == "Combi"
+
+
+def test_renamed_sheet_with_changed_title_matches_object_types(tmp_path, wave1_spec):
+    path = _combi(tmp_path, wave1_spec)
+    workbook = load_workbook(path)
+    workbook["Combi"].title = "Anders"
+    workbook["Anders"]["A1"] = "Totaal ander titel"
+    workbook.save(path)
+    sheet = read_refined(path, wave1_spec).sheets[0]
+    assert sheet.tab.merged_from == ["Bord", "Verharding"]
+    diffs = dict(diff_workbook(read_refined(path, wave1_spec), wave1_spec, LayoutEngine(wave1_spec)))
+    assert not any(e.kind == "added" for e in diffs["Anders"].entries)
+
+
+def test_sheet_without_determinable_object_types_warns(tmp_path, exported, wave1_spec):
+    workbook = load_workbook(exported)
+    workbook["Bord"].title = "Zwart"
+    workbook["Zwart"]["A2"] = None
+    workbook["Zwart"]["A1"] = "Zonder"
+    path = tmp_path / "unknown.xlsx"
+    workbook.save(path)
+    sheet = read_refined(path).sheets[0]
+    assert any("could not be determined" in w for w in sheet.warnings)
+
+
+def test_reference_sheets_include_source_types_of_inherited_attributes(tmp_path, wave1_file):
+    workbook = load_workbook(wave1_file)
+    workbook["Objecttypen"].append(
+        ["Groot Verkeersbord", "g", "u", "IMBOR", "Nieuw", "Borden", "Wave 1", "Point", "def"],
+    )
+    path = tmp_path / "inherit.xlsx"
+    workbook.save(path)
+    spec = read_spec(path)
+    engine = LayoutEngine(spec)
+    tab = engine.build("Nieuw", [o for o in spec.object_types if o.name == "Groot Verkeersbord"])
+    assert engine._source_type("Groot Verkeersbord") == "Verkeersbord"
+    out = export_workbook([tab], tmp_path / "out.xlsx", spec=spec)
+    sheet = load_workbook(out)["Bron Attributen"]
+    rows = [r for r in sheet.iter_rows(min_row=4, values_only=True) if any(v is not None for v in r)]
+    assert rows and {str(r[0]) for r in rows} == {"Verkeersbord"}
+    types = load_workbook(out)["Bron Objecttypen"]
+    assert [r[0] for r in types.iter_rows(min_row=4, values_only=True) if r[0]] == ["Groot Verkeersbord"]
+
+
+def test_designs_named_like_reference_or_metadata_sheets_survive(tmp_path, wave1_spec):
+    tabs = LayoutEngine(wave1_spec).build_all()
+    tabs[0].name, tabs[1].name = "Bron Objecttypen", "_designer"
+    path = export_workbook(tabs, tmp_path / "named.xlsx", spec=wave1_spec)
+    meta = read_metadata(path)
+    assert meta is not None
+    assert meta["metadata_sheet"] == "_designer (2)"
+    assert meta["reference_sheets"] == ["Bron Objecttypen (2)", "Bron Attributen"]
+    refined = read_refined(path, wave1_spec)
+    assert [s.name for s in refined.sheets] == ["Bron Objecttypen", "_designer"]
+    assert not refined.warnings
+
+
+def _cell_values(sheet) -> list[list[tuple[str, int | None, str]]]:
+    return [[(c.label, c.footnote, c.annotation) for c in r] for s in sheet.sections for r in s.rows]
+
+
+def _payload_view(tab, spec):
+    from passport_designer.payload import build_tab_payload
+
+    result = build_tab_payload(tab)
+    return result.body, [(i.code, i.message) for i in result.issues]
+
+
+def test_legacy_import_keeps_annotation_separate_from_label(tmp_path, wave1_spec):
+    from passport_designer.payload import build_tab_payload
+
+    engine = LayoutEngine(wave1_spec, LayoutOptions(profile=LEGACY))
+    tab = engine.build_all()[0]
+    path = export_workbook([tab], tmp_path / "legacy.xlsx", spec=wave1_spec)
+    imported = read_refined(path, wave1_spec).sheets[0].tab
+    owner = next(c for s in tab.sections for r in s.rows for c in r if c.annotation)
+    cells = {(c.label, c.annotation) for s in imported.sections for r in s.rows for c in r}
+    assert (owner.label, owner.annotation) in cells
+    assert _cell_values(imported) == _cell_values(tab)
+    assert build_tab_payload(imported).body == build_tab_payload(tab).body
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_asterisk_survives_import_and_re_export(tmp_path, wave1_spec, legacy):
+    engine = LayoutEngine(wave1_spec, LayoutOptions(profile=LEGACY) if legacy else LayoutOptions())
+    tab = engine.build_all()[0]
+    first = export_workbook([tab], tmp_path / "a.xlsx", spec=wave1_spec)
+    imported = read_refined(first, wave1_spec).sheets[0].tab
+    assert legacy or any(c.label == "IMBOR Filter*" for s in imported.sections for r in s.rows for c in r)
+    second = export_workbook([imported], tmp_path / "b.xlsx", spec=wave1_spec)
+
+    def values(path):
+        sheet = load_workbook(path)["Bord"]
+        return [[c.value for c in row] for row in sheet.iter_rows()]
+
+    assert values(second) == values(first)
+    before, after = _payload_view(tab, wave1_spec), _payload_view(imported, wave1_spec)
+    assert before == after and (legacy or any(code == "open-design-questions" for code, _ in after[1]))
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_unchanged_export_resolves_ids_and_has_empty_diff(tmp_path, wave1_spec, legacy):
+    """NL: Een ongewijzigde export houdt 'Beheergroep' als API-label (met id) en '*' in het ontwerp; de diff is leeg.
+    EN: An unchanged export keeps 'Beheergroep' as API label (with ID) and '*' in the design; the diff is empty."""
+    from passport_designer.field_map import FieldIdMap
+    from passport_designer.payload import build_tab_payload
+
+    engine = LayoutEngine(wave1_spec, LayoutOptions(profile=LEGACY) if legacy else LayoutOptions())
+    tab = engine.build_all()[0]
+    path = export_workbook([tab], tmp_path / "x.xlsx", spec=wave1_spec)
+    refined = read_refined(path, wave1_spec)
+    imported = refined.sheets[0].tab
+    cells = [c for s in imported.sections for r in s.rows for c in r]
+    ids = FieldIdMap()
+    for number, cell in enumerate(cells, start=1):
+        ids.add(cell.label.rstrip("*").strip(), number)
+    if legacy:
+        group = next(c for c in cells if c.annotation)
+        assert group.label == "Beheergroep" and group.display == f"Beheergroep ({group.annotation})"
+    else:
+        assert any(c.label == "IMBOR Filter*" for c in cells)
+    result = build_tab_payload(imported, ids)
+    text = json.dumps(result.body)
+    assert "Beheergroep (" not in text and (not legacy or '"label": "Beheergroep"' in text)
+    assert not any(i.code == "unresolved-field-ids" for i in result.issues)
+    assert legacy or any(i.code == "open-design-questions" for i in result.issues)
+    diffs = dict(diff_workbook(refined, wave1_spec, engine))
+    assert not diffs[refined.sheets[0].name].entries

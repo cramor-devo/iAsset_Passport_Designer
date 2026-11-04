@@ -74,16 +74,68 @@ Het logbestand staat in `%LOCALAPPDATA%\iAssetPassportDesigner\passport_designer
    gelden, krijgen een voetnoot: dit zijn de velden die je in iAsset per subthema aan- of uitzet. Met **Voorbeeld
    samengevoegd paspoort** bekijk je een voorstel, met **Samenvoegen toepassen** voeg je de filters samen en met
    **Samenvoegmatrix exporteren…** sla je een matrix van velden × objecttypen op.
+   Je kunt ook handmatig samenvoegen: selecteer twee of meer paspoorten in de lijst (Ctrl/Shift+klik) en kies
+   **Bestand → Geselecteerde paspoorten samenvoegen…** (**Ctrl+M**, ook in het contextmenu en als **Selectie
+   samenvoegen…** op het tabblad Samenvoegadvies). Dat werkt ongeacht filter, groep of drempel van het advies. Geef het
+   nieuwe paspoort een naam (verplicht, maximaal 50 tekens, uniek). Verschillen de paspoorten in beheergroep of
+   filter, dan toont het venster die verschillen en moet je het uitdrukkelijk bevestigen (Annuleren is de standaard).
+   Een handmatige samenvoeging maak je net als andere samenvoegingen ongedaan; bij een ingelezen ontwerp is ze niet
+   beschikbaar.
 5. Kies **Bestand → Veld-ID-bestand laden…** om een export van `GET /diverse-fields` te laden: de V2-paspoort-diverse-veldenlijst (bijv. `passport field list.csv`,
    CSV met puntkomma `id;label;name;type;values;…`; JSON en xlsx met label/name en id werken ook). Elk paspoortveld
-   krijgt de `id` van het diverse veld met dezelfde label. Zonder veld-ID's krijgt `field_id` de waarde `null` en meldt het tabblad
-   **Validatie** een fout.
+   krijgt de `id` van het diverse veld met dezelfde label. Het iAsset-veldencatalogus-xlsx uit de GUI (met de tabbladen
+   `Paspoort velden` en `Thema Subthema`) werkt ook. Zonder veld-ID's krijgt `field_id` de waarde `null` en meldt het
+   tabblad **Validatie** een fout.
 6. Op het tabblad **API-payload** kopieer je de payload of sla je hem op. Plak de JSON in iAsset Syncer → API Explorer
    → V2 → `POST /passport-tabs`. Syncer verstuurt de gegevens als multipart-formulier
    (`fields[0][children][1][label]`); het formaat **Formuliervelden (Laravel)** toont dezelfde velden in die vorm.
 7. **Bestand → Excel-ontwerp exporteren…** maakt één tabblad per paspoort. **Bestand → Excel-ontwerp per objecttype
    exporteren…** maakt één tabblad per objecttype, zonder de velden die daar niet voor gelden. **Bestand → Mockup als
-   PNG exporteren…** slaat de mockup (zoals in het voorbeeld) op als afbeelding.
+   PNG exporteren…** slaat de mockup (zoals in het voorbeeld) op als afbeelding. Elke Excel-export bevat ook de
+   naslagbladen `Bron Objecttypen` en `Bron Attributen` (de specificatieregels van de geëxporteerde objecttypen, met
+   bronbestand en datum) en een verborgen blad `_designer` met metagegevens (versie, profiel, specificatiebestanden,
+   filterkolom, tabblad → objecttypen).
+8. **Bestand → Veld-ID's controleren…** controleert de paspoortvelden **offline** tegen de geladen veld-ID's: het
+   programma roept iAsset nooit aan. Laad eerst een opgeslagen V2 `GET /diverse-fields`-JSON of het
+   veldencatalogus-xlsx uit de iAsset-GUI. Het venster toont per veld of het ID gevonden of ontbreekt, of label of
+   veldtype afwijkt en of het veld is ingeschakeld voor het subthema van elk objecttype (op naam gekoppeld; dat vraagt
+   het catalogus-xlsx, een JSON bevat alleen subthema-ID's). Is er al een catalogus geladen, kies dan **Geladen
+   catalogus gebruiken** of **Vergelijkingscatalogus kiezen…** (een apart bestand, bijv. het xlsx naast een geladen
+   JSON, zodat veldtypeverschillen en subthemanamen worden gecontroleerd). Met **Exporteren…** sla je het rapport op als xlsx.
+9. **Bestand → Bijgewerkt Excel-ontwerp importeren…** leest een handmatig verfijnd ontwerp in (bij voorkeur een
+   export van dit programma) en toont het als huidig ontwerp. De tabbladen verschijnen in iAsset-stijl, met
+   kolombreedtes uit Excel. Het tabblad **Vergelijking** zet de import naast een vers uit de geladen specificatie
+   gegenereerd ontwerp: toegevoegde, verwijderde, verplaatste en hernoemde velden per sectie, plus labels die niet in
+   de specificatie staan. **Beeld → Wijzigingen markeren** omlijnt die velden in de mockup; dit staat standaard uit,
+   zodat screenshots schoon blijven. **Bestand → Terug naar gegenereerd ontwerp** brengt je terug naar het
+   gegenereerde ontwerp. Bij een ingelezen ontwerp kun je geen geselecteerde paspoorten samenvoegen en niet per
+   objecttype exporteren.
+10. **Bestand → Annotaties controleren/repareren…** controleert een verfijnd Excel-bestand tegen de specificatie:
+    `(n)`-markeringen die niet kloppen, dubbele nummers, gaten en `Opmerkingen`-regels die niet kloppen. Alleen de
+    markeringen bij Object informatie worden gecontroleerd. **Repareren → _fixed.xlsx** schrijft
+    `<naam>_fixed.xlsx` met een eigen nummer per veld in leesvolgorde en de `Opmerkingen`-tekst naast de juiste
+    regels. Opmaak en layout blijven ongewijzigd en het originele bestand verandert niet. Bevat het blad tekeningen,
+    dan waarschuwt het programma.
+
+### Aanbevolen werkwijze
+
+1. Exporteer het Excel-ontwerp (**Bestand → Excel-ontwerp exporteren…**) en werk het uit in Excel.
+2. Draai **Bestand → Annotaties controleren/repareren…** en gebruik de `_fixed.xlsx`-kopie.
+3. Importeer het met **Bestand → Bijgewerkt Excel-ontwerp importeren…** en bekijk het tabblad **Vergelijking**.
+4. Maak een screenshot met **Bestand → Mockup als PNG exporteren…** (markeren uit voor een schoon resultaat).
+
+### Sneltoetsen
+
+| Actie | Sneltoets |
+|---|---|
+| Veld-ID-bestand laden… | Ctrl+I |
+| Veld-ID's controleren… | Ctrl+Shift+D |
+| Bijgewerkt Excel-ontwerp importeren… | Ctrl+Shift+I |
+| Annotaties controleren/repareren… | Ctrl+Shift+A |
+| Geselecteerde paspoorten samenvoegen… | Ctrl+M |
+| Excel-ontwerp exporteren… | Ctrl+E |
+| Excel-ontwerp per objecttype exporteren… | Ctrl+Shift+E |
+| Mockup als PNG exporteren… | Ctrl+P |
 
 ## Ontwerpprofielen
 
@@ -109,24 +161,27 @@ Haal de relatiesecties (Sem.Rel) uit zo'n bestand en schrijf ze naar
 python tools/extract_relations.py handmatig.xlsx
 ```
 
-## Aannames om te controleren op een testomgeving
+## Payload-codes (gecontroleerd)
 
-De OpenAPI-specificatie van `POST /passport-tabs` noemt `field_type ∈ {0, 1, 2}`, maar legt niet uit wat de waarden
-betekenen. Het programma gebruikt daarom deze standaardwaarden:
+De payload heeft dezelfde structuur als wat iAsset echt opslaat, gecontroleerd met een echte `GET /templates/tabs`:
 
-- een rij (bovenste niveau) krijgt `field_type` `1` en een veld (onderliggend niveau) krijgt `field_type` `0`;
-- de `field_id` van een rij is `0`;
-- `order` begint bij `1`;
-- rijen zonder titel krijgen het onzichtbare label U+FE0F, net zoals iAsset dat zelf doet.
+- secties zijn layout-elementen (`field_type` `2`): rij/sectie `10` (vervolgrijen krijgen het onzichtbare label
+  U+FE0F), horizontale lijn `1`, *Actoren en rollen* `11`, *Memo* / *Is beschreven door* `19`, relaties `17`–`27`
+  (standaard `18` *Is verbonden met*; *Constructielagen* is `23` *Bestaat uit*), *Geometrie* `4`, *iASSET-id* `16`;
+- velden zijn systeemvelden (`field_type` `0`: Nummer 1, Naam 2, Thema 3, Subthema 4, Rds coordinaten 23) of diverse
+  velden (`field_type` `1`, ID uit het veld-ID-bestand);
+- tussen opeenvolgende secties komt een horizontale lijn; *iASSET-id* is een eigen element helemaal aan het eind;
+- `order` begint bij `1` en telt items op het bovenste niveau (lijnen meegeteld) en onderliggende velden apart;
+- niet herkende relatiesecties worden als *Is verbonden met* verstuurd, met een INFO-melding.
 
-Je kunt deze waarden aanpassen via **Instellingen → Payload-instellingen…**. Controleer ze op een testomgeving
-voordat je de payloads in productie gebruikt.
+Alle codes (en de lijnen) kun je aanpassen via **Instellingen → Payload-instellingen…**. Zichtbaarheid per sjabloon
+stel je in met `POST/PATCH /templates`, niet in deze payload.
 
 ## Bekende beperkingen
 
 - Bepalen welke velden in welk paspoort horen, blijft mensenwerk. Het programma toont liever te veel velden dan te
   weinig; jij haalt weg wat niet nodig is.
-- Herhaalbare secties (Actoren, Memo) worden als één rij verstuurd. Zet ze daarna in iAsset op herhalen.
+- Relatie-, Memo- en Actoren-secties worden als iAsset-elementen verstuurd; de voorbeeldrijen uit het ontwerp niet.
 - Objecttypen zonder attributen in de brongegevens worden gemeld op het tabblad **Validatie**.
 
 ## Ontwikkelen
