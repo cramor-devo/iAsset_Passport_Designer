@@ -1,0 +1,389 @@
+[
+  {
+    "id": 11,
+    "label": "Herkomst",
+    "type": "select",
+    "values": [
+      {
+        "value": "01",
+        "label": "Historie uitgevoerd onderhoud (Obsurv)"
+      },
+      {
+        "value": "02",
+        "label": "Planning iASSET"
+      }
+    ],
+    "order": 0,
+    "group": 0,
+    "mandatory": false,
+    "suffix": null,
+    "themes": [
+      {
+        "theme": 0,
+        "subtheme": 8445
+      },
+      {
+        "theme": 0,
+        "subtheme": 8446
+      },
+      {
+        "theme": 0,
+        "subtheme": 8447
+      },
+      {
+        "theme": 0,
+        "subtheme": 8448
+      },
+      {
+        "theme": 0,
+        "subtheme": 8449
+      },
+      {
+        "theme": 0,
+        "subtheme": 8450
+      },
+      {
+        "theme": 0,
+        "subtheme": 0
+      }
+    ]
+  },
+  {
+    "id": 5,
+    "label": "Maatregelgroep (CROW)",
+    "type": "select",
+    "values": [
+      {
+        "value": "00",
+        "label": "Geen maatregel uitvoeren"
+      },
+      {
+        "value": "01",
+        "label": "Conserveren"
+      },
+      {
+        "value": "02",
+        "label": "Gedeeltelijk groot onderhoud"
+      },
+      {
+        "value": "03",
+        "label": "Gedeeltelijk groot onderhoud en conserveren"
+      },
+      {
+        "value": "04",
+        "label": "Verbeteren vlakheid"
+      },
+      {
+        "value": "05",
+        "label": "Versterken"
+      },
+      {
+        "value": "06",
+        "label": "Rehabiliteren"
+      },
+      {
+        "value": "07",
+        "label": "Ophogen"
+      },
+      {
+        "value": "08",
+        "label": "Gedeeltelijk groot onderhoud (30%)"
+      },
+      {
+        "value": "09",
+        "label": "Gedeeltelijk groot onderhoud (50%)"
+      }
+    ],
+    "order": 1,
+    "group": 0,
+    "mandatory": false,
+    "suffix": null,
+    "themes": [
+      {
+        "theme": 0,
+        "subtheme": 8445
+      },
+      {
+        "theme": 0,
+        "subtheme": 8446
+      },
+      {
+        "theme": 0,
+        "subtheme": 8447
+      },
+      {
+        "theme": 0,
+        "subtheme": 8448
+      },
+      {
+        "theme": 0,
+        "subtheme": 8449
+      },
+      {
+        "theme": 0,
+        "subtheme": 8450
+      },
+      {
+        "theme": 0,
+        "subtheme": 0
+      }
+    ]
+  },
+  {
+    "id": 6,
+    "label": "Ophoogklasse",
+    "type": "select",
+    "values": [
+      {
+        "value": "01",
+        "label": "0 tot 10 cm"
+      },
+      {
+        "value": "02",
+        "label": "10 tot 20 cm"
+      },
+      {
+        "value": "03",
+        "label": "20 tot 40 cm"
+      },
+      {
+        "value": "04",
+        "label": "40 cm en hoger"
+      }
+    ],
+    "order": 2,
+    "group": 0,
+    "mandatory": false,
+    "suffix": null,
+    "themes": [
+      {
+        "theme": 0,
+        "subtheme": 8445
+      },
+      {
+        "theme": 0,
+        "subtheme": 8446
+      },
+      {
+        "theme": 0,
+        "subtheme": 8447
+      },
+      {
+        "theme": 0,
+        "subtheme": 8448
+      },
+      {
+        "theme": 0,
+        "subtheme": 8449
+      },
+      {
+        "theme": 0,
+        "subtheme": 8450
+      },
+      {
+        "theme": 0,
+        "subtheme": 0
+      }
+    ]
+  },
+  {
+    "id": 7,
+    "label": "Maatregeldikte",
+    "type": "numeric",
+    "values": [],
+    "order": 3,
+    "group": 0,
+    "mandatory": false,
+    "suffix": "mm",
+    "themes": [
+      {
+        "theme": 0,
+        "subtheme": 8445
+      },
+      {
+        "theme": 0,
+        "subtheme": 8446
+      },
+      {
+        "theme": 0,
+        "subtheme": 8447
+      },
+      {
+        "theme": 0,
+        "subtheme": 8448
+      },
+      {
+        "theme": 0,
+        "subtheme": 8449
+      },
+      {
+        "theme": 0,
+        "subtheme": 8450
+      },
+      {
+        "theme": 0,
+        "subtheme": 0
+      }
+    ]
+  },
+  {
+    "id": 8,
+    "label": "Bestek",
+    "type": "input",
+    "values": [],
+    "order": 4,
+    "group": 0,
+    "mandatory": false,
+    "suffix": null,
+    "themes": [
+      {
+        "theme": 0,
+        "subtheme": 8445
+      },
+      {
+        "theme": 0,
+        "subtheme": 8446
+      },
+      {
+        "theme": 0,
+        "subtheme": 8447
+      },
+      {
+        "theme": 0,
+        "subtheme": 8448
+      },
+      {
+        "theme": 0,
+        "subtheme": 8449
+      },
+      {
+        "theme": 0,
+        "subtheme": 8450
+      },
+      {
+        "theme": 0,
+        "subtheme": 0
+      }
+    ]
+  },
+  {
+    "id": 9,
+    "label": "Brontekst maatregel",
+    "type": "input",
+    "values": [],
+    "order": 5,
+    "group": 0,
+    "mandatory": false,
+    "suffix": null,
+    "themes": [
+      {
+        "theme": 0,
+        "subtheme": 8445
+      },
+      {
+        "theme": 0,
+        "subtheme": 8446
+      },
+      {
+        "theme": 0,
+        "subtheme": 8447
+      },
+      {
+        "theme": 0,
+        "subtheme": 8448
+      },
+      {
+        "theme": 0,
+        "subtheme": 8449
+      },
+      {
+        "theme": 0,
+        "subtheme": 8450
+      },
+      {
+        "theme": 0,
+        "subtheme": 0
+      }
+    ]
+  },
+  {
+    "id": 10,
+    "label": "Bron-id (Obsurv)",
+    "type": "input",
+    "values": [],
+    "order": 6,
+    "group": 0,
+    "mandatory": false,
+    "suffix": null,
+    "themes": [
+      {
+        "theme": 0,
+        "subtheme": 8445
+      },
+      {
+        "theme": 0,
+        "subtheme": 8446
+      },
+      {
+        "theme": 0,
+        "subtheme": 8447
+      },
+      {
+        "theme": 0,
+        "subtheme": 8448
+      },
+      {
+        "theme": 0,
+        "subtheme": 8449
+      },
+      {
+        "theme": 0,
+        "subtheme": 8450
+      },
+      {
+        "theme": 0,
+        "subtheme": 0
+      }
+    ]
+  },
+  {
+    "id": 12,
+    "label": "Toelichting (bron)",
+    "type": "input",
+    "values": [],
+    "order": 7,
+    "group": 0,
+    "mandatory": false,
+    "suffix": null,
+    "themes": [
+      {
+        "theme": 0,
+        "subtheme": 8445
+      },
+      {
+        "theme": 0,
+        "subtheme": 8446
+      },
+      {
+        "theme": 0,
+        "subtheme": 8447
+      },
+      {
+        "theme": 0,
+        "subtheme": 8448
+      },
+      {
+        "theme": 0,
+        "subtheme": 8449
+      },
+      {
+        "theme": 0,
+        "subtheme": 8450
+      },
+      {
+        "theme": 0,
+        "subtheme": 0
+      }
+    ]
+  }
+]
