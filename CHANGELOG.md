@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.4.0
+- Import a manually refined Excel design (*File → Import refined Excel…*) and show it as an iAsset-style mockup with
+  Excel-relative column widths. The *Cross-reference* panel compares it with a freshly generated design from the loaded
+  specification (added, removed, moved and renamed fields per section, plus labels not in the spec); *View → Highlight
+  changes* outlines them in the mockup (off by default, so screenshots stay clean). *Back to generated design* returns
+  to the generated design (#10).
+- The mockup is restyled after iAsset for all designs: view dropdown, tab bar, section titles, dark header band with
+  centred labels and rounded value boxes (#10).
+- *Check/fix annotations…*: checks the `(n)` markers and `Opmerkingen` rows of a refined Excel file against the spec and
+  writes a repaired `<name>_fixed.xlsx` (own number per field in reading order, layout and styling untouched, original
+  file unchanged). Only Object informatie markers are checked; a warning appears when the sheet contains drawings (#11).
+- Every Excel export contains the reference sheets `Bron Objecttypen` and `Bron Attributen` (raw spec rows for the
+  exported object types, with source file and date) and a hidden `_designer` metadata sheet (version, profile, spec
+  files, filter column, tab → object types) that the import uses when present (#12).
+- *Check field IDs…*: offline check of the passport fields against a saved V2 `GET /diverse-fields` JSON or the iAsset
+  GUI field catalog xlsx: ID found or missing, label and field-type mismatch, and enabled per subthema. Shown in a
+  dialog and exportable to xlsx. The app never calls iAsset (#13).
+- *Load field ID file…* also accepts the iAsset GUI field catalog xlsx (`Paspoort velden` plus `Thema Subthema`) (#14).
+- *Merge selected passports…* (Ctrl+M): merge the selected passports regardless of filter, group or advisor threshold,
+  with a name dialog and a confirmation when group or filter differ. Joins Undo/Reset, export and payload; disabled while
+  an imported design is shown (#15).
+
 ## 0.3.1
 - Field ID import now reads the V2 passport diverse-fields list (`passport field list.csv`): fixed CSV parsing of the
   large JSON `values` column (quoted newlines, `;` inside cells), so passport fields get their IDs from it.
