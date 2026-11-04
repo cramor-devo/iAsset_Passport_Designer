@@ -573,8 +573,8 @@ class MainWindow(QMainWindow):
         box.setText(tr("idcheck.choose.text", name=loaded.source or "?"))
         use_loaded = box.addButton(tr("idcheck.choose.loaded"), QMessageBox.ButtonRole.AcceptRole)
         other = box.addButton(tr("idcheck.choose.other"), QMessageBox.ButtonRole.ActionRole)
-        box.addButton(QMessageBox.StandardButton.Cancel)
-        box.setDefaultButton(use_loaded)
+        cancel = box.addButton(QMessageBox.StandardButton.Cancel)
+        box.setDefaultButton(cancel)
         self._exec_dialog(box)
         clicked = box.clickedButton()
         return CATALOG_LOADED if clicked is use_loaded else CATALOG_OTHER if clicked is other else ""

@@ -157,3 +157,14 @@ def test_one_place_moved_while_label_stays_elsewhere():
     assert [(e.kind, e.from_section, e.to_section) for e in diff_tab(imported, generated).entries] == [
         (MOVED, "Object informatie", "Basis"),
     ]
+
+
+def test_repeater_rows_do_not_count_as_extra_occurrences_but_new_section_does():
+    generated = _tab({"Object informatie": ["aanlegjaar"], "Constructielagen": ["laag", "dikte"]})
+    generated.sections[1].rows.append([Cell("laag"), Cell("dikte")])
+    imported = _tab({"Object informatie": ["aanlegjaar"], "Constructielagen": ["laag", "dikte", "aanlegjaar"]})
+    imported.sections[1].rows.extend([[Cell("laag"), Cell("dikte"), Cell("aanlegjaar")]] * 2)
+    assert [(e.label, e.kind, e.to_section) for e in diff_tab(imported, generated).entries] == [
+        ("aanlegjaar", ADDED, "Constructielagen"),
+    ]
+    assert diff_tab(imported, imported).is_empty

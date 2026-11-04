@@ -377,6 +377,19 @@ def test_check_field_ids_can_use_separate_comparison_catalog(window, tmp_path, m
     assert len(shown) == 1
 
 
+def test_choose_catalog_source_defaults_to_cancel(window, monkeypatch):
+    from PyQt6.QtWidgets import QMessageBox
+
+    from passport_designer.field_catalog import FieldCatalog
+
+    boxes: list[QMessageBox] = []
+    monkeypatch.setattr(window, "_exec_dialog", lambda box: boxes.append(box) or 0)
+    assert window._choose_catalog_source(FieldCatalog(source="x.json")) == ""  # niets gekozen / nothing chosen
+    box = boxes[0]
+    assert box.defaultButton() is box.button(QMessageBox.StandardButton.Cancel)
+    assert len(box.buttons()) == 3
+
+
 def test_annotation_dialog_with_report_and_fix(window, exported_file, monkeypatch):
     pytest.importorskip("passport_designer.annotations")
     from passport_designer.annotations import AnnotationIssue, AnnotationReport, FixResult

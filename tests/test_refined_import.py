@@ -296,3 +296,33 @@ def test_asterisk_survives_import_and_re_export(tmp_path, wave1_spec, legacy):
     assert values(second) == values(first)
     before, after = _payload_view(tab, wave1_spec), _payload_view(imported, wave1_spec)
     assert before == after and (legacy or any(code == "open-design-questions" for code, _ in after[1]))
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_unchanged_export_resolves_ids_and_has_empty_diff(tmp_path, wave1_spec, legacy):
+    """NL: Een ongewijzigde export houdt 'Beheergroep' als API-label (met id) en '*' in het ontwerp; de diff is leeg.
+    EN: An unchanged export keeps 'Beheergroep' as API label (with ID) and '*' in the design; the diff is empty."""
+    from passport_designer.field_map import FieldIdMap
+    from passport_designer.payload import build_tab_payload
+
+    engine = LayoutEngine(wave1_spec, LayoutOptions(profile=LEGACY) if legacy else LayoutOptions())
+    tab = engine.build_all()[0]
+    path = export_workbook([tab], tmp_path / "x.xlsx", spec=wave1_spec)
+    refined = read_refined(path, wave1_spec)
+    imported = refined.sheets[0].tab
+    cells = [c for s in imported.sections for r in s.rows for c in r]
+    ids = FieldIdMap()
+    for number, cell in enumerate(cells, start=1):
+        ids.add(cell.label.rstrip("*").strip(), number)
+    if legacy:
+        group = next(c for c in cells if c.annotation)
+        assert group.label == "Beheergroep" and group.display == f"Beheergroep ({group.annotation})"
+    else:
+        assert any(c.label == "IMBOR Filter*" for c in cells)
+    result = build_tab_payload(imported, ids)
+    text = json.dumps(result.body)
+    assert "Beheergroep (" not in text and (not legacy or '"label": "Beheergroep"' in text)
+    assert not any(i.code == "unresolved-field-ids" for i in result.issues)
+    assert legacy or any(i.code == "open-design-questions" for i in result.issues)
+    diffs = dict(diff_workbook(refined, wave1_spec, engine))
+    assert not diffs[refined.sheets[0].name].entries

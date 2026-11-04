@@ -340,3 +340,42 @@ def test_legacy_note_lines_follow_renumbering(tmp_path, spec):
     assert not any(n.startswith("(7)") for n in notes) and notes[0].startswith("(1) Objecttype:")
     values = [c.value for row in load_workbook(result.out_path)["Bord"].iter_rows() for c in row if c.value]
     assert "Eigen notitie" in values
+
+
+def test_legacy_swapped_fields_keep_their_note_definitions(tmp_path, spec):
+    path = _legacy_design(tmp_path, spec)
+
+    def swap(sheet):
+        alfa, beta = _find_in(sheet, "alfa"), _find_in(sheet, "beta")
+        alfa.value, beta.value = beta.value, alfa.value
+        sheet.cell(row=sheet.max_row + 1, column=1, value="Eigen notitie")
+
+    _edit(path, swap)
+    assert any(i.kind == "order" for i in check_annotations(path, spec).issues)
+    result = fix_annotations(path, spec)
+    assert result.report_after.ok
+    sheet = load_workbook(result.out_path)["Bord"]
+    notes = {}
+    for line in _note_values(result.out_path):
+        number, _, names = line.partition(") Objecttype:")
+        notes[int(number.lstrip("("))] = [n.strip() for n in names.split(",")]
+    for label, types in (("alfa", ["A", "B"]), ("beta", ["A"])):
+        number = int(str(_find_in(sheet, label).value).split("(")[1].split(")")[0])
+        assert notes[number] == types
+    assert "Eigen notitie" in [c.value for row in sheet.iter_rows() for c in row]
+
+
+def test_shared_number_with_matching_remarks_is_still_duplicate(tmp_path):
+    spec = SpecModel()
+    spec.object_types = [ObjectType(n, "Bord", "Borden") for n in ("A", "B")]
+    spec.attributes = {"A": [*COMMON, "alfa", "beta"], "B": COMMON}
+    design = export_workbook(LayoutEngine(spec).build_all(), tmp_path / "same.xlsx", spec=spec)
+
+    def reuse(sheet):
+        for label in ("alfa", "beta"):
+            cell = _find_in(sheet, label)
+            cell.value = f"{label} (1)"
+            sheet.cell(row=cell.row, column=7, value="(1) Objecttype: A")
+
+    report = check_annotations(_edit(design, reuse), spec)
+    assert [i.kind for i in report.issues if i.severity != "info"] == ["duplicate-number"]
