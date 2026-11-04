@@ -105,6 +105,9 @@ class FieldCatalog:
     source: str = ""
     subtheme_names: dict[int, str] = field(default_factory=dict)
     theme_names: dict[int, str] = field(default_factory=dict)
+    _label_index: dict[str, list[FieldInfo]] = field(default_factory=dict, init=False, repr=False, compare=False)
+    _subtheme_index: dict[str, set[int]] = field(default_factory=dict, init=False, repr=False, compare=False)
+    _index_stamp: tuple[int, int] | None = field(default=None, init=False, repr=False, compare=False)
 
     def __len__(self) -> int:
         return len(self.entries)
@@ -119,12 +122,36 @@ class FieldCatalog:
     def by_label(self, label: str) -> list[FieldInfo]:
         """Velden met dit label (hoofdletter-/spatie-ongevoelig). / Fields with this label (case/space-insensitive)."""
         key = norm(label)
-        return [info for info in self.entries.values() if norm(info.label) == key] if key else []
+        if not key:
+            return []
+        self._ensure_index()
+        return list(self._label_index.get(key, ()))
+
+    def invalidate(self) -> None:
+        """Forceer een nieuwe index na het wijzigen van labels. / Force a rebuilt index after changing labels."""
+        self._index_stamp = None
+
+    def _ensure_index(self) -> None:
+        """Lazy index; vervalt als het aantal velden of subthema's verandert. / Lazy index; rebuilt when the number of
+        entries or subtheme names changes."""
+        stamp = (len(self.entries), len(self.subtheme_names))
+        if self._index_stamp == stamp:
+            return
+        labels: dict[str, list[FieldInfo]] = {}
+        for info in self.entries.values():
+            labels.setdefault(norm(info.label), []).append(info)
+        subthemes: dict[str, set[int]] = {}
+        for sid, sname in self.subtheme_names.items():
+            subthemes.setdefault(norm(sname), set()).add(sid)
+        self._label_index, self._subtheme_index, self._index_stamp = labels, subthemes, stamp
 
     def subthemes_for_name(self, name: str) -> set[int]:
         """Subthema-id's met deze naam. / Subtheme IDs with this name."""
         key = norm(name)
-        return {sid for sid, sname in self.subtheme_names.items() if norm(sname) == key} if key else set()
+        if not key:
+            return set()
+        self._ensure_index()
+        return set(self._subtheme_index.get(key, ()))
 
 
 def _pick(record: Mapping[str, object], keys: tuple[str, ...]) -> object:

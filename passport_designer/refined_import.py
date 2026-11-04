@@ -16,7 +16,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from .compare import ELLIPSIS_CHARS
 from .design_rules import SECTION_NOTES
-from .excel_export import GREY, METADATA_SHEET, PURPLE, REFERENCE_SHEETS
+from .excel_export import GREY, METADATA_SHEET, PURPLE, REFERENCE_SHEETS, find_metadata_sheet
 from .layout_engine import semantic_style
 from .models import Cell, ObjectType, PassportTab, Section, SectionStyle, SpecModel, norm
 from .profiles import LEGACY, PROFILES, ROTTERDAM_V3, DesignProfile
@@ -29,6 +29,7 @@ TRAILING_FOOTNOTE = re.compile(r"\s*\((\d+)\)\s*$")
 MERGED_NOTE = re.compile(r"^Samengevoegd uit filters:\s*(.*)$", re.IGNORECASE)
 HEADING_SCAN_ROWS = 6
 DEFAULT_WIDTH = 8.43
+# Alleen gebruikt voor bestanden zonder metadata. / Only used for files without metadata.
 SKIPPED_SHEETS = {norm(name) for name in (METADATA_SHEET, *REFERENCE_SHEETS.values())}
 Position = tuple[int, int]
 
@@ -53,6 +54,7 @@ class RefinedSheet:
     column_widths: list[float] = field(default_factory=list)
     margin_column: int | None = None
     margin_width: float | None = None
+    meta_key: str | None = None  # sleutel in metadata['sheets'] (kan afwijken van de bladnaam) / key in metadata
     metadata: dict[str, Any] | None = None  # blokje van dit blad uit '_designer' / this sheet's '_designer' entry
     warnings: list[str] = field(default_factory=list)
 
@@ -94,7 +96,7 @@ def read_metadata(path: str | Path) -> dict[str, Any] | None:
 
 
 def _metadata(workbook: Any) -> dict[str, Any] | None:
-    name = next((n for n in workbook.sheetnames if norm(n) == METADATA_SHEET), None)
+    name = find_metadata_sheet(workbook)
     if name is None:
         return None
     result: dict[str, Any] = {"sheets": {}}
@@ -107,7 +109,7 @@ def _metadata(workbook: Any) -> dict[str, Any] | None:
                 info = json.loads(value)
                 info["footnotes"] = {int(n): list(names) for n, names in info.get("footnotes", {}).items()}
                 result["sheets"][key[len("sheet:") :]] = info
-            elif key == "sources":
+            elif key in ("sources", "reference_sheets"):
                 result[key] = list(json.loads(value))
             else:
                 result[key] = value
@@ -192,10 +194,43 @@ def _add_footnotes(text: str, footnotes: dict[int, list[str]]) -> None:
         footnotes.setdefault(int(match.group(1)), names)
 
 
+def _header_of(sheet: Worksheet) -> tuple[str, list[str]]:
+    """Titel (A1) en objecttypenamen (A2) van een blad met kop. / Title (A1) and object type names (A2) of a sheet."""
+    second = _text(sheet.cell(row=2, column=1))
+    if not second.casefold().startswith(OBJECT_TYPES_LINE):
+        return "", []
+    names = [t.strip() for t in second.split(":", 1)[1].split(",") if t.strip()]
+    return _text(sheet.cell(row=1, column=1)), names
+
+
+def _match_metadata(
+    sheet: Worksheet, workbook_meta: dict[str, Any] | None, claimed: set[str],
+) -> tuple[str | None, dict[str, Any] | None]:
+    """Metadata van een blad: op bladnaam; bij een hernoemd blad op de tabnaam in A1, anders op dezelfde set
+    objecttypen. ``claimed`` bevat sleutels die al aan een blad zijn gekoppeld.
+    Metadata of a sheet: by sheet name; for a renamed sheet by the tab name in A1, else by the same set of object
+    types. ``claimed`` holds keys already linked to a sheet."""
+    entries: dict[str, Any] = (workbook_meta or {}).get("sheets", {})
+    if sheet.title in entries:
+        return sheet.title, entries[sheet.title]
+    title, names = _header_of(sheet)
+    free = [(key, info) for key, info in entries.items() if key not in claimed]
+    if title:
+        for key, info in free:
+            if norm(str(info.get("tab", ""))) == norm(title):
+                return key, info
+    wanted = {norm(n) for n in names}
+    if wanted:
+        for key, info in free:
+            if {norm(n) for n in info.get("object_types", [])} == wanted:
+                return key, info
+    return None, None
+
+
 def _read_sheet(
-    sheet: Worksheet, spec: SpecModel | None, workbook_meta: dict[str, Any] | None,
+    sheet: Worksheet, spec: SpecModel | None, workbook_meta: dict[str, Any] | None, claimed: set[str] | None = None,
 ) -> RefinedSheet | None:
-    sheet_meta = (workbook_meta or {}).get("sheets", {}).get(sheet.title)
+    meta_key, sheet_meta = _match_metadata(sheet, workbook_meta, claimed if claimed is not None else set())
     margin = _find_margin_column(sheet)
     grid_end = (margin - 1) if margin else max(sheet.max_column, 1)
     if sheet_meta is None and not _looks_like_design(sheet, grid_end):
@@ -216,10 +251,14 @@ def _read_sheet(
     types = _object_types(type_names, spec, warnings)
     if not types and spec is not None:
         types = list(spec.filters().get(tab_name, []))
+    if not types:
+        warnings.append("The object types of this sheet could not be determined.")
     tab = PassportTab(tab_name, next((o.group for o in types if o.group), ""), types, profile=profile)
     tab.merged_from = list((sheet_meta or {}).get("merged_from", []))
 
-    result = RefinedSheet(sheet.title, tab, margin_column=margin, metadata=sheet_meta, warnings=warnings)
+    result = RefinedSheet(
+        sheet.title, tab, margin_column=margin, meta_key=meta_key, metadata=sheet_meta, warnings=warnings,
+    )
     section: Section | None = None
     notes_mode = False
     pending_blank = False
@@ -329,13 +368,27 @@ def read_refined(path: str | Path, spec: SpecModel | None = None) -> RefinedWork
     result = RefinedWorkbook(file_path)
     try:
         result.metadata = _metadata(workbook)
+        meta = result.metadata
+        metadata_name = find_metadata_sheet(workbook)
+        entries: dict[str, Any] = meta["sheets"] if meta else {}
+        recorded = meta.get("reference_sheets") if meta else None
+        references = {norm(n) for n in recorded} if isinstance(recorded, list) else SKIPPED_SHEETS
+        claimed = {title for title in workbook.sheetnames if title in entries}
         for sheet in workbook.worksheets:
-            if norm(sheet.title) in SKIPPED_SHEETS:
+            if sheet.title == metadata_name:
                 continue
-            refined = _read_sheet(sheet, spec, result.metadata)
+            if meta is None:
+                skip = norm(sheet.title) in SKIPPED_SHEETS
+            else:
+                skip = sheet.title not in entries and norm(sheet.title) in references
+            if skip:
+                continue
+            refined = _read_sheet(sheet, spec, result.metadata, claimed)
             if refined is None:
                 result.warnings.append(f"Sheet '{sheet.title}' does not look like a passport design; skipped.")
                 continue
+            if refined.meta_key is not None:
+                claimed.add(refined.meta_key)
             result.sheets.append(refined)
     finally:
         workbook.close()

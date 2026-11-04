@@ -31,21 +31,35 @@ def tab(app, wave1_spec):
     return LayoutEngine(wave1_spec).build_all()[0]
 
 
-def test_equal_columns_without_widths(tab):
+def row_grids(mockup: PassportMockup) -> list[QGridLayout]:
+    grids = [w.layout() for w in mockup.findChildren(QWidget, "mockRow")]
+    return [g for g in grids if isinstance(g, QGridLayout)]
+
+
+def test_row_with_n_fields_has_n_full_width_columns(tab):
     mockup = PassportMockup()
     mockup.show_tab(tab, "", DARK)
-    assert set(mockup.column_stretch()) == {1}
-    grid = first_grid(mockup)
-    assert {grid.columnStretch(i) for i in range(5)} == {1}
+    sizes = set()
+    for index, section in enumerate(tab.sections):
+        for row_index, row in enumerate(section.rows):
+            assert mockup.row_stretch(index, row_index, list(range(len(row)))) == [1] * len(row)
+            if row:
+                sizes.add(len(row))
+    grids = row_grids(mockup)
+    counts = {g.columnCount() for g in grids}
+    assert counts == sizes and len(sizes) > 1  # rijen met 3 en 4 velden / rows with 3 and 4 fields
+    for grid in grids:
+        assert {grid.columnStretch(i) for i in range(grid.columnCount())} == {1}
+        assert grid.count() == 2 * grid.columnCount()  # kop + waarde per veld, geen lege plekken
 
 
-def test_excel_widths_become_stretch_factors(tab):
+def test_excel_widths_of_occupied_columns_become_stretch_factors(tab):
     mockup = PassportMockup()
-    mockup.show_tab(tab, "", LIGHT, column_widths=[10.0, 20.0, 0.0, 40.0])
-    stretch = mockup.column_stretch()
-    assert stretch[:2] == [100, 200] and stretch[3] == 400 and stretch[2] == round(8.43 * 10)
-    grid = first_grid(mockup)
-    assert [grid.columnStretch(i) for i in range(4)] == [100, 200, stretch[2], 400]
+    positions = {(0, 0, 0): (4, 1), (0, 0, 1): (4, 3), (0, 0, 2): (4, 4)}
+    mockup.show_tab(tab, "", LIGHT, column_widths=[10.0, 20.0, 0.0, 40.0], positions=positions)
+    assert mockup.row_stretch(0, 0, [0, 1, 2]) == [100, round(8.43 * 10), 400]
+    grid = row_grids(mockup)[0]
+    assert [grid.columnStretch(i) for i in range(3)] == [100, round(8.43 * 10), 400]
 
 
 def test_styling_elements_and_extra_tabs(tab):

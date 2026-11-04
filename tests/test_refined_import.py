@@ -183,3 +183,73 @@ def test_sheet_without_margin_column_and_odd_rows(tmp_path, exported, wave1_spec
     assert bord.margin_column is None and any("Opmerkingen" in w for w in bord.warnings)
     assert [c.label for c in bord.tab.sections[0].rows[0]] == ["Nummer", "IMBOR Filter", "Thema", "Subthema"]
     assert bord.tab.sections[-1].rows[-1][0].label == "extra"
+
+
+def _combi(tmp_path, wave1_spec) -> Path:
+    tab = merged_tab(wave1_spec, LayoutEngine(wave1_spec), ["Bord", "Verharding"], "Combi")
+    return export_workbook([tab], tmp_path / "combi.xlsx", spec=wave1_spec)
+
+
+def test_renamed_sheet_keeps_metadata_via_tab_name(tmp_path, wave1_spec):
+    path = _combi(tmp_path, wave1_spec)
+    workbook = load_workbook(path)
+    workbook["Combi"].title = "Mijn blad"
+    workbook.save(path)
+    sheet = read_refined(path, wave1_spec).sheets[0]
+    assert sheet.name == "Mijn blad" and sheet.tab.merged_from == ["Bord", "Verharding"]
+    assert sheet.meta_key == "Combi"
+
+
+def test_renamed_sheet_with_changed_title_matches_object_types(tmp_path, wave1_spec):
+    path = _combi(tmp_path, wave1_spec)
+    workbook = load_workbook(path)
+    workbook["Combi"].title = "Anders"
+    workbook["Anders"]["A1"] = "Totaal ander titel"
+    workbook.save(path)
+    sheet = read_refined(path, wave1_spec).sheets[0]
+    assert sheet.tab.merged_from == ["Bord", "Verharding"]
+    diffs = dict(diff_workbook(read_refined(path, wave1_spec), wave1_spec, LayoutEngine(wave1_spec)))
+    assert not any(e.kind == "added" for e in diffs["Anders"].entries)
+
+
+def test_sheet_without_determinable_object_types_warns(tmp_path, exported, wave1_spec):
+    workbook = load_workbook(exported)
+    workbook["Bord"].title = "Zwart"
+    workbook["Zwart"]["A2"] = None
+    workbook["Zwart"]["A1"] = "Zonder"
+    path = tmp_path / "unknown.xlsx"
+    workbook.save(path)
+    sheet = read_refined(path).sheets[0]
+    assert any("could not be determined" in w for w in sheet.warnings)
+
+
+def test_reference_sheets_include_source_types_of_inherited_attributes(tmp_path, wave1_file):
+    workbook = load_workbook(wave1_file)
+    workbook["Objecttypen"].append(
+        ["Groot Verkeersbord", "g", "u", "IMBOR", "Nieuw", "Borden", "Wave 1", "Point", "def"],
+    )
+    path = tmp_path / "inherit.xlsx"
+    workbook.save(path)
+    spec = read_spec(path)
+    engine = LayoutEngine(spec)
+    tab = engine.build("Nieuw", [o for o in spec.object_types if o.name == "Groot Verkeersbord"])
+    assert engine._source_type("Groot Verkeersbord") == "Verkeersbord"
+    out = export_workbook([tab], tmp_path / "out.xlsx", spec=spec)
+    sheet = load_workbook(out)["Bron Attributen"]
+    rows = [r for r in sheet.iter_rows(min_row=4, values_only=True) if any(v is not None for v in r)]
+    assert rows and {str(r[0]) for r in rows} == {"Verkeersbord"}
+    types = load_workbook(out)["Bron Objecttypen"]
+    assert [r[0] for r in types.iter_rows(min_row=4, values_only=True) if r[0]] == ["Groot Verkeersbord"]
+
+
+def test_designs_named_like_reference_or_metadata_sheets_survive(tmp_path, wave1_spec):
+    tabs = LayoutEngine(wave1_spec).build_all()
+    tabs[0].name, tabs[1].name = "Bron Objecttypen", "_designer"
+    path = export_workbook(tabs, tmp_path / "named.xlsx", spec=wave1_spec)
+    meta = read_metadata(path)
+    assert meta is not None
+    assert meta["metadata_sheet"] == "_designer (2)"
+    assert meta["reference_sheets"] == ["Bron Objecttypen (2)", "Bron Attributen"]
+    refined = read_refined(path, wave1_spec)
+    assert [s.name for s in refined.sheets] == ["Bron Objecttypen", "_designer"]
+    assert not refined.warnings

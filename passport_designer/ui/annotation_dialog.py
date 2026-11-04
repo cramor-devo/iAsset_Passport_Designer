@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ..i18n import tr
+from .workers import Job, run_job
 
 log = logging.getLogger(__name__)
 
@@ -74,6 +75,7 @@ class AnnotationDialog(QDialog):
         self.fix_button.clicked.connect(self.run_fix)
         self.close_button.clicked.connect(self.accept)
         self.fix_result: Any = None
+        self._fixing = False
         self.show_report(report)
 
     def show_report(self, report: Any) -> None:
@@ -93,21 +95,38 @@ class AnnotationDialog(QDialog):
         self.fix_result = result
         lines = [tr("annot.fixed", path=str(result.out_path)), tr("annot.changes", count=len(result.changes))]
         lines += [f"  • {change}" for change in result.changes]
+        warnings = list(getattr(result, "warnings", []))
+        if warnings:
+            lines.append(tr("annot.warnings"))
+            lines += [f"  ! {warning}" for warning in warnings]
         lines.append(tr("annot.after", issues=len(result.report_after.issues)))
         self.result_box.setPlainText("\n".join(lines))
         self.result_box.setVisible(True)
         self.show_report(result.report_after)
 
     def run_fix(self) -> None:
-        if self._fixer is None:
+        """Repareer op een werkthread; het resultaat verschijnt via ``show_fix_result``.
+        Repair on a worker thread; the result arrives through ``show_fix_result``."""
+        if self._fixer is None or self._fixing:
             return
-        try:
-            result = self._fixer()
-        except Exception as exc:  # noqa: BLE001 - elke fout wordt gelogd en gemeld / every error is logged and reported
-            log.exception("Annotation fix failed")
-            QMessageBox.warning(self, tr("error.title"), tr("annot.fix_failed", detail=f"{type(exc).__name__}: {exc}"))
-            return
+        self._fixing = True
+        self.fix_button.setEnabled(False)
+        fixer = self._fixer
+        job = Job(lambda progress: fixer())
+        job.signals.finished.connect(self._on_fixed)
+        job.signals.failed.connect(self._on_fix_failed)
+        run_job(job)
+
+    def _on_fixed(self, result: object) -> None:
+        self._fixing = False
+        self.fix_button.setEnabled(self._fixer is not None)
         self.show_fix_result(result)
+
+    def _on_fix_failed(self, error: object) -> None:
+        self._fixing = False
+        self.fix_button.setEnabled(self._fixer is not None)
+        log.warning("Annotation fix failed: %s", error)
+        QMessageBox.warning(self, tr("error.title"), tr("annot.fix_failed", detail=f"{type(error).__name__}: {error}"))
 
 
 def fixed_name(path: str | Path) -> Path:

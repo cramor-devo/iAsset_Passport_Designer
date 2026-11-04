@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import re
+import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -17,7 +18,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
 from .design_rules import SECTION_OBJECT
-from .excel_export import METADATA_SHEET, WRAP_TOP
+from .excel_export import WRAP_TOP, find_metadata_sheet
 from .layout_engine import LayoutEngine
 from .models import ObjectType, SpecModel, norm
 from .refined_import import FOOTNOTE_REMARK, MARGIN_HEADER, RefinedSheet, read_refined
@@ -76,6 +77,7 @@ class FixResult:
     out_path: Path
     changes: list[str] = field(default_factory=list)
     report_after: AnnotationReport = field(default_factory=lambda: AnnotationReport(Path(".")))
+    warnings: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -191,6 +193,13 @@ def _claimed(
     return known
 
 
+def _object_sections(sheet: RefinedSheet) -> set[int]:
+    """Indices van de secties 'Object informatie'; zonder zo'n sectie (oude indeling) tellen alle secties mee.
+    Indices of the 'Object informatie' sections; without one (legacy layout) all sections count."""
+    found = {i for i, s in enumerate(sheet.tab.sections) if norm(s.title) == norm(SECTION_OBJECT)}
+    return found or set(range(len(sheet.tab.sections)))
+
+
 def _analyse(
     sheet: RefinedSheet, engine: LayoutEngine | None,
 ) -> tuple[list[AnnotationIssue], list[tuple[_Field, _Expected]]]:
@@ -204,16 +213,19 @@ def _analyse(
     def add(cell: str, kind: str, severity: str, detail: str) -> None:
         issues.append(AnnotationIssue(sheet.name, cell, kind, severity, detail))
 
-    object_section = next((i for i, s in enumerate(sheet.tab.sections) if norm(s.title) == norm(SECTION_OBJECT)), -1)
+    object_sections = _object_sections(sheet)
     wanted: list[tuple[_Field, _Expected]] = []
     first_set: dict[int, tuple[frozenset[str] | None, str]] = {}
     for item in fields:
         cell = _coordinate(item.row, item.column)
         claimed = _claimed(sheet, remarks, item, fields)
-        expected = context.expected(item.key) if context.active else _Expected(item.number is not None, claimed, False)
-        if context.active and not expected.known:
-            expected = _Expected(item.number is not None, claimed, False)
-            if item.section == object_section:
+        # Alleen de objectsectie volgt de spec; velden in relatie-/vaste secties houden hun eigen markering.
+        # Only the object section follows the spec; fields in relation/fixed sections keep their own marker.
+        expected = _Expected(item.number is not None, claimed, False)
+        if context.active and item.section in object_sections:
+            expected = context.expected(item.key)
+            if not expected.known:
+                expected = _Expected(item.number is not None, claimed, False)
                 add(cell, UNKNOWN_LABEL, "info", f"'{item.label}' staat niet in de spec / is not in the spec")
         wanted.append((item, expected))
         if item.number is None:
@@ -311,7 +323,7 @@ def _rewrite_label(text: str, number: int | None) -> str:
 
 
 def _update_metadata(workbook: Any, footnotes: dict[str, dict[int, list[str]]]) -> None:
-    name = next((n for n in workbook.sheetnames if norm(n) == METADATA_SHEET), None)
+    name = find_metadata_sheet(workbook)
     if name is None:
         return
     for row in workbook[name].iter_rows(min_row=2):
@@ -342,20 +354,18 @@ def _fix_sheet(
     wanted = _analyse(sheet, engine)[1]
     remarks = _remarks_of(sheet)
     fields = [item for item, _ in wanted]
-    numbering: dict[object, int] = {}
     types_of: dict[int, list[str]] = {}
     assigned: list[tuple[_Field, int | None]] = []
+    counter = 0
     for item, expected in wanted:
         if not expected.marked:
             assigned.append((item, None))
             continue
+        counter += 1  # elk veld met voetnoot een eigen nummer in leesvolgorde / own number per footnoted field
         types = expected.types if expected.types is not None else _claimed(sheet, remarks, item, fields)
-        key: object = _type_key(types) if types else ("old", item.number)
-        if key not in numbering:
-            numbering[key] = len(numbering) + 1
-            if types:
-                types_of[numbering[key]] = list(types)
-        assigned.append((item, numbering[key]))
+        if types:
+            types_of[counter] = list(types)
+        assigned.append((item, counter))
 
     by_row: dict[int, list[tuple[int, list[str]]]] = {}
     for item, number in assigned:
@@ -392,16 +402,39 @@ def _fix_sheet(
     return types_of
 
 
+def _drawing_warnings(source: Path, workbook: Any) -> list[str]:
+    """Waarschuw voor afbeeldingen, tekeningen en grafieken: openpyxl behoudt die niet.
+    Warn about images, drawings and charts: openpyxl does not preserve them."""
+    sheets = [ws.title for ws in workbook.worksheets if getattr(ws, "_images", None) or getattr(ws, "_charts", None)]
+    if not sheets:
+        try:
+            with zipfile.ZipFile(source) as archive:
+                has_drawings = any(n.startswith("xl/drawings/") for n in archive.namelist())
+        except (OSError, zipfile.BadZipFile):
+            has_drawings = False
+        sheets = ["?"] if has_drawings else []
+    return [
+        f"Blad '{name}' bevat afbeeldingen, tekeningen of grafieken; die gaan verloren in het herstelde bestand / "
+        f"sheet '{name}' contains images, drawings or charts; they are lost in the fixed file"
+        if name != "?" else
+        "Het bestand bevat tekeningen of afbeeldingen; die gaan verloren in het herstelde bestand / "
+        "the file contains drawings or images; they are lost in the fixed file"
+        for name in sheets
+    ]
+
+
 def fix_annotations(
     path: str | Path,
     spec: SpecModel | None,
     engine: LayoutEngine | None = None,
     out_path: str | Path | None = None,
 ) -> FixResult:
-    """Hernummer de voetnoten per blad in leesvolgorde, herstel markeringen (met ``spec``) en schrijf de opmerkingen
-    naast de juiste rijen. Schrijft ``<naam>_fixed.xlsx`` (nooit over het origineel); opmaak blijft ongemoeid.
-    Renumber footnotes per sheet in reading order, repair markers (with ``spec``) and write the remarks beside the
-    right rows. Writes ``<name>_fixed.xlsx`` (never over the input); formatting is left untouched."""
+    """Geef elk veld met voetnoot een eigen nummer (1..n in leesvolgorde, zoals de generator), herstel markeringen
+    (met ``spec``) en schrijf de opmerkingen naast de juiste rijen. Schrijft ``<naam>_fixed.xlsx`` (nooit over het
+    origineel); opmaak blijft ongemoeid. Afbeeldingen/grafieken gaan verloren (zie ``FixResult.warnings``).
+    Give each footnoted field its own number (1..n in reading order, like the generator), repair markers (with
+    ``spec``) and write the remarks beside the right rows. Writes ``<name>_fixed.xlsx`` (never over the input);
+    formatting is left untouched. Images/charts are lost (see ``FixResult.warnings``)."""
     source = Path(path)
     target = Path(out_path) if out_path is not None else _free_path(source)
     if target.resolve() == source.resolve():
@@ -410,12 +443,13 @@ def fix_annotations(
     refined = read_refined(source, spec if spec is not None else (engine.spec if engine else None))
     workbook = load_workbook(source)
     changes: list[str] = []
+    warnings = _drawing_warnings(source, workbook)
     metadata: dict[str, dict[int, list[str]]] = {}
     try:
         for sheet in refined.sheets:
             if sheet.name not in workbook.sheetnames:
                 continue
-            metadata[sheet.name] = _fix_sheet(workbook[sheet.name], sheet, use_engine, changes)
+            metadata[sheet.meta_key or sheet.name] = _fix_sheet(workbook[sheet.name], sheet, use_engine, changes)
             if sheet.margin_column is None:
                 changes.append(f"Blad {sheet.name}: geen 'Opmerkingen'-kolom, opmerkingen niet bijgewerkt / "
                                f"no remarks column, remarks not updated")
@@ -424,4 +458,4 @@ def fix_annotations(
         workbook.save(target)
     finally:
         workbook.close()
-    return FixResult(target, changes, check_annotations(target, spec, engine))
+    return FixResult(target, changes, check_annotations(target, spec, engine), warnings)

@@ -391,7 +391,7 @@ class MainWindow(QMainWindow):
         self.apply_button.setText(tr("merge.apply"))
         self.reset_button.setText(tr("merge.reset"))
         self.merge_selected_button.setText(tr("merge.selected"))
-        self.merge_selected_button.setToolTip(tr("merge.selected_tip"))
+        self._update_merge_state()
         self.merge_export_button.setText(tr("merge.export"))
         columns = ("name", "similarity", "types", "fields", "fit")
         self.merge_tree.setHeaderLabels([tr(f"merge.col.{c}") for c in columns])
@@ -593,7 +593,33 @@ class MainWindow(QMainWindow):
         return IdCheckDialog(check_ids(self.tabs, catalog, self.ids), self)
 
     def show_id_check(self, catalog: FieldCatalog) -> None:
-        self._exec_dialog(self.id_check_dialog_for(catalog))
+        """Controleer op een werkthread en toon daarna de dialoog. / Check on a worker thread, then show the dialog."""
+        if self._busy:
+            return
+        self._busy = True
+        tabs, ids = list(self.tabs), self.ids
+
+        def work(progress: Callable[[str], None]) -> list[Any]:
+            progress(tr("status.checking_ids"))
+            return check_ids(tabs, catalog, ids)
+
+        job = Job(work)
+        job.signals.progress.connect(self.statusBar().showMessage)
+        job.signals.finished.connect(self._on_ids_checked)
+        job.signals.failed.connect(self._on_ids_check_failed)
+        run_job(job)
+
+    def _on_ids_checked(self, findings: object) -> None:
+        self._busy = False
+        self.statusBar().showMessage(tr("status.ready"))
+        if isinstance(findings, list):
+            self._exec_dialog(IdCheckDialog(findings, self))
+
+    def _on_ids_check_failed(self, error: object) -> None:
+        self._busy = False
+        log.warning("Field ID check failed: %s", error)
+        self._warn(tr("error.id_check", detail=f"{type(error).__name__}: {error}"))
+        self.statusBar().showMessage(tr("status.ready"))
 
     def _exec_dialog(self, dialog: QDialog) -> int:
         """Eén plek om dialogen te tonen (tests vervangen deze). / Single place to show dialogs (tests replace it)."""
@@ -651,6 +677,7 @@ class MainWindow(QMainWindow):
         self.tabs = [entry.sheet.tab for entry in self.imported_sheets]
         self._preview = None
         self.back_action.setEnabled(True)
+        self._update_merge_state()
         self._fill_filter_list()
         self._update_title()
         self.crossref_panel.show_report(
@@ -685,8 +712,28 @@ class MainWindow(QMainWindow):
         self.imported = None
         self.imported_sheets = []
         self.back_action.setEnabled(False)
+        self._update_merge_state()
         self.crossref_panel.show_report("", None, [], self.spec is not None)
         self._update_title()
+
+    def _update_merge_state(self) -> None:
+        """Samenvoegen alleen bij het gegenereerde ontwerp; een import zou erdoor vervallen.
+        Merging only for the generated design; it would discard an import."""
+        blocked = self.imported is not None
+        tip = tr("merge.imported_disabled")
+        for widget in (self.apply_button, self.merge_selected_button, self.reset_button, self.merge_selected_action):
+            widget.setEnabled(not blocked)
+        self.apply_button.setToolTip(tip if blocked else "")
+        self.reset_button.setToolTip(tip if blocked else "")
+        self.merge_selected_button.setToolTip(tip if blocked else tr("merge.selected_tip"))
+        self.merge_selected_action.setToolTip(tip if blocked else "")
+        self.merge_selected_action.setStatusTip(tip if blocked else "")
+
+    def _merge_blocked(self) -> bool:
+        if self.imported is None:
+            return False
+        self.statusBar().showMessage(tr("merge.imported_disabled"))
+        return True
 
     def _update_title(self) -> None:
         title = tr("app.title")
@@ -923,13 +970,23 @@ class MainWindow(QMainWindow):
         self.views.setCurrentIndex(0)
         self.statusBar().showMessage(tr("merge.previewing", name=suggestion.name))
 
+    def _report_merge(self, name: str) -> None:
+        """Meld succes alleen als de samenvoeging echt in de ontwerpen zit. / Report success only if really merged."""
+        if any(t.name == name and t.merged_from for t in self.tabs):
+            self.statusBar().showMessage(tr("merge.applied", name=name))
+            return
+        self.applied_merges = [m for m in self.applied_merges if m[0] != name]
+        self.statusBar().showMessage(tr("merge.not_applied", name=name))
+
     def apply_selected_merge(self) -> None:
+        if self._merge_blocked():
+            return
         suggestion = self._selected_suggestion()
         if suggestion is None:
             return
         self.applied_merges.append((suggestion.name, list(suggestion.members)))
         self._rebuild_designs()
-        self.statusBar().showMessage(tr("merge.applied", name=suggestion.name))
+        self._report_merge(suggestion.name)
 
     def _show_filter_menu(self, pos: QPoint) -> None:
         """Contextmenu van de paspoortlijst. / Context menu of the passport list."""
@@ -969,6 +1026,8 @@ class MainWindow(QMainWindow):
     def _apply_manual_merge(self, name: str, names: list[str]) -> None:
         """Voeg de paspoorten samen onder ``name``; eerdere samenvoegingen van de leden vervallen.
         Merge the passports under ``name``; earlier merges of those members are replaced."""
+        if self._merge_blocked():
+            return
         members = self._expand_members(names)
         self.applied_merges = [m for m in self.applied_merges if not set(m[1]) & set(members)]
         self.applied_merges.append((name, members))
@@ -976,10 +1035,12 @@ class MainWindow(QMainWindow):
         for row, tab in enumerate(self.tabs):
             if tab.name == name:
                 self.filter_list.setCurrentRow(row)
-        self.statusBar().showMessage(tr("merge.applied", name=name))
+        self._report_merge(name)
 
     def merge_selected(self) -> None:
         """Voeg de geselecteerde paspoorten samen, ongeacht filter of groep. / Merge the selected passports."""
+        if self._merge_blocked():
+            return
         rows = sorted({self.filter_list.row(i) for i in self.filter_list.selectedItems()})
         names = [self.tabs[r].name for r in rows if 0 <= r < len(self.tabs)]
         dialog = self._merge_dialog_for(names) if len(names) > 1 else None
@@ -990,6 +1051,8 @@ class MainWindow(QMainWindow):
             self._apply_manual_merge(dialog.merge_name(), names)
 
     def reset_merges(self) -> None:
+        if self._merge_blocked():
+            return
         self.applied_merges.clear()
         self._rebuild_designs()
         self.statusBar().showMessage(tr("merge.reset_done"))
@@ -1016,6 +1079,7 @@ class MainWindow(QMainWindow):
         self.mockup.show_tab(
             shown, self.selected_object_type(), PALETTES[self.theme_name],
             entry.sheet.column_widths if entry else None, self.current_highlights(tab),
+            entry.sheet.positions if entry else None,
         )
         self.sheet_preview.show_tab(shown)
         self.payload = build_tab_payload(tab, self.ids, self.options) if tab else None

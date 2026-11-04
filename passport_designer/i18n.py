@@ -75,6 +75,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "mock.fullscreen": {"en": "Full screen", "nl": "Volledig scherm"},
     "mock.close": {"en": "Close", "nl": "Sluiten"},
     "status.ready": {"en": "Ready.", "nl": "Klaar."},
+    "status.checking_ids": {"en": "Checking field IDs…", "nl": "Veld-ID's controleren…"},
+    "status.fixing": {"en": "Repairing annotations…", "nl": "Annotaties herstellen…"},
     "status.loading": {"en": "Loading {name}…", "nl": "{name} laden…"},
     "status.loaded": {
         "en": "Loaded {files} file(s): {filters} filters, {types} object types.",
@@ -187,6 +189,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Select two or more passports in the list (Ctrl/Shift+click) and merge them, whatever their filter.",
         "nl": "Selecteer twee of meer paspoorten in de lijst (Ctrl/Shift+klik) en voeg ze samen, ongeacht het filter.",
     },
+    "merge.imported_disabled": {
+        "en": "Merging is not available for an imported design. Choose 'Back to generated design' first.",
+        "nl": "Samenvoegen kan niet bij een ingelezen ontwerp. Kies eerst 'Terug naar gegenereerd ontwerp'.",
+    },
+    "merge.not_applied": {
+        "en": "Merge '{name}' was not applied: its members are not all available as separate passports.",
+        "nl": "Samenvoeging '{name}' is niet toegepast: niet alle leden zijn als apart paspoort beschikbaar.",
+    },
     "merge.need_two": {
         "en": "Select at least two passports in the list first.",
         "nl": "Selecteer eerst minstens twee paspoorten in de lijst.",
@@ -284,6 +294,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "No passport design sheets were found in this file.",
         "nl": "In dit bestand zijn geen paspoortontwerp-bladen gevonden.",
     },
+    "error.id_check": {
+        "en": "The field IDs could not be checked:\n{detail}",
+        "nl": "De veld-ID's konden niet worden gecontroleerd:\n{detail}",
+    },
+    "annot.warnings": {"en": "Warnings:", "nl": "Waarschuwingen:"},
     "error.annotations": {
         "en": "The annotations could not be checked:\n{detail}",
         "nl": "De annotaties konden niet worden gecontroleerd:\n{detail}",

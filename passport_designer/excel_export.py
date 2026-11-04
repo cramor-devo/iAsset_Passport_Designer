@@ -8,6 +8,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
+from typing import Any
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
@@ -15,7 +16,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
 from . import __version__
-from .layout_engine import notes_section
+from .layout_engine import LayoutEngine, notes_section
 from .merge_advisor import MergeSuggestion, field_matrix
 from .models import PassportTab, RawSheet, Section, SectionStyle, SpecModel, norm
 
@@ -29,6 +30,19 @@ METADATA_FORMAT = "1"
 INVALID_SHEET_CHARS = re.compile(r"[\[\]:*?/\\]")
 BOLD = Font(bold=True)
 WRAP_TOP = Alignment(wrap_text=True, vertical="top")
+
+
+def find_metadata_sheet(workbook: Any) -> str | None:
+    """Naam van het verborgen metadatablad: bij voorkeur '_designer', anders een blad dat er qua kop uitziet
+    (kop key/value, daarna 'format'). Name of the hidden metadata sheet: preferably '_designer', otherwise a sheet
+    with the metadata header (key/value, then 'format')."""
+    names = sorted(workbook.sheetnames, key=lambda n: norm(n) != METADATA_SHEET)
+    for name in names:
+        rows = list(workbook[name].iter_rows(min_row=1, max_row=2, max_col=2, values_only=True))
+        head = [tuple(str(v).strip().casefold() if v is not None else "" for v in row) for row in rows]
+        if len(head) == 2 and head[0] == ("key", "value") and head[1][0] == "format":
+            return str(name)
+    return None
 
 
 def sheet_title(name: str, used: set[str]) -> str:
@@ -213,6 +227,10 @@ def add_reference_sheets(workbook: Workbook, spec: SpecModel, tabs: list[Passpor
     Add 'Bron Objecttypen' and 'Bron Attributen' (raw copy of the spec, filtered to the object types of ``tabs``).
     Does nothing when ``spec`` has no raw data. Returns the names of the added sheets."""
     object_types = {norm(o.name) for tab in tabs for o in tab.object_types}
+    engine = LayoutEngine(spec)
+    # Objecttypen zonder eigen attributen erven van een bronobjecttype; die attribuutrijen horen er ook bij.
+    # Object types without own attributes inherit from a source type; those attribute rows belong too.
+    with_sources = object_types | {norm(engine._source_type(o.name)) for tab in tabs for o in tab.object_types}
     today = date.today().isoformat()
     added: list[str] = []
     for key, title in REFERENCE_SHEETS.items():
@@ -220,13 +238,14 @@ def add_reference_sheets(workbook: Workbook, spec: SpecModel, tabs: list[Passpor
         if not sheets:
             continue
         name = sheet_title(title, used)
-        _reference_sheet(workbook, name, sheets, object_types, today)
+        _reference_sheet(workbook, name, sheets, with_sources if key == "attributen" else object_types, today)
         added.append(name)
     return added
 
 
 def write_metadata(
     workbook: Workbook, tabs: list[PassportTab], titles: list[str], spec: SpecModel | None, used: set[str],
+    reference_sheets: list[str] | None = None,
 ) -> None:
     """Verborgen blad '_designer' met sleutel/waarde-regels (versie, profiel, bronnen, filterkolom en per ontwerpblad
     de objecttypen, samenvoeging en voetnoten als JSON). Hidden '_designer' sheet with key/value rows (version,
@@ -234,6 +253,8 @@ def write_metadata(
     sheet = workbook.create_sheet(sheet_title(METADATA_SHEET, used))
     sheet.append(["key", "value"])
     sheet.append(["format", METADATA_FORMAT])
+    sheet.append(["metadata_sheet", sheet.title])
+    sheet.append(["reference_sheets", json.dumps(reference_sheets or [], ensure_ascii=False)])
     sheet.append(["app_version", __version__])
     sheet.append(["profile", tabs[0].profile.key])
     sheet.append(["sources", json.dumps(spec.sources if spec else [], ensure_ascii=False)])
@@ -267,6 +288,7 @@ def export_workbook(
     if default_sheet is not None:
         workbook.remove(default_sheet)
     used: set[str] = set()
+    references: list[str] = []
     names = sheet_names if sheet_names is not None and len(sheet_names) == len(tabs) else [t.name for t in tabs]
     titles: list[str] = []
     for tab, name in zip(tabs, names, strict=True):
@@ -274,8 +296,8 @@ def export_workbook(
         titles.append(sheet.title)
         write_tab(sheet, tab)
     if spec is not None:
-        add_reference_sheets(workbook, spec, tabs, used)
-    write_metadata(workbook, tabs, titles, spec, used)
+        references = add_reference_sheets(workbook, spec, tabs, used)
+    write_metadata(workbook, tabs, titles, spec, used, references)
     target = Path(path)
     workbook.save(target)
     return target

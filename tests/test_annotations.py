@@ -212,3 +212,72 @@ def test_metadata_footnotes_updated(design, spec):
     assert result.report_after.ok
     assert "1" in info["footnotes"]
     assert _remarks(result.out_path)
+
+
+def _section_labels(path: Path, skip_object: bool) -> list[tuple[str, str, int | None]]:
+    refined = read_refined(path).sheets[0]
+    return [
+        (section.title, cell.label, cell.footnote)
+        for section in refined.tab.sections
+        if (section.title != "Object informatie") == skip_object
+        for row in section.rows
+        for cell in row
+    ]
+
+
+def test_fresh_merged_export_has_no_findings_in_relation_sections(tmp_path, wave1_spec):
+    from passport_designer.merge_advisor import merged_tab
+
+    engine = LayoutEngine(wave1_spec)
+    tab = merged_tab(wave1_spec, engine, ["Bord", "Verharding"], "Combi")
+    assert "aanlegjaar" in {c.label.lower() for s in tab.sections for r in s.rows for c in r if c.footnote}
+    path = export_workbook([tab], tmp_path / "merged.xlsx", spec=wave1_spec)
+    relation = [s for s in tab.sections if s.title.startswith(("Constructielagen", "Wegvak informatie"))]
+    assert relation  # relatiesecties met veldnamen als 'aanlegjaar' / relation sections with names like 'aanlegjaar'
+    report = check_annotations(path, wave1_spec)
+    assert report.ok and not [i for i in report.issues if i.severity in ("error", "warning")]
+    result = fix_annotations(path, wave1_spec)
+    assert result.report_after.ok
+    assert _section_labels(result.out_path, True) == _section_labels(path, True)
+    assert not any("Constructielagen" in c or "Wegvak" in c for c in result.changes)
+
+
+def test_fix_gives_each_footnoted_field_its_own_number(tmp_path):
+    spec = SpecModel()
+    spec.object_types = [ObjectType(n, "Bord", "Borden") for n in ("A", "B", "C")]
+    spec.attributes = {
+        "A": ["gamma", "alfa", "epsilon"],
+        "B": ["gamma", "alfa", "epsilon", "delta"],
+        "C": ["gamma", "delta"],
+    }
+    path = export_workbook(LayoutEngine(spec).build_all(), tmp_path / "own.xlsx", spec=spec)
+
+    def shuffle(sheet):
+        for row in sheet.iter_rows():
+            for cell in row:
+                if isinstance(cell.value, str) and cell.value.rstrip("* ").endswith(("(1)", "(2)", "(3)")):
+                    cell.value = cell.value.rsplit("(", 1)[0] + "(7)"  # alles dezelfde stale nummer
+
+    result = fix_annotations(_edit(path, shuffle), spec)
+    numbers = _numbers_in_reading_order(result.out_path)
+    assert numbers == list(range(1, len(numbers) + 1)) and len(numbers) == 3  # alfa, delta, epsilon
+    assert result.report_after.ok
+
+
+def test_fix_warns_about_drawings_and_still_writes(design, spec):
+    from openpyxl.chart import BarChart, Reference
+
+    def add_chart(sheet):
+        chart = BarChart()
+        chart.add_data(Reference(sheet, min_col=1, min_row=1, max_row=3))
+        sheet.add_chart(chart, "J2")
+
+    path = _edit(design, add_chart)
+    result = fix_annotations(path, spec)
+    assert result.out_path.exists() and result.warnings
+    assert "Bord" in result.warnings[0] or "tekening" in result.warnings[0]
+    assert fix_annotations(_clean(design, spec), spec).warnings == []
+
+
+def _clean(design: Path, spec: SpecModel) -> Path:
+    return export_workbook(LayoutEngine(spec).build_all(), design.with_name("clean.xlsx"), spec=spec)

@@ -30,7 +30,6 @@ TOOL_ICONS: tuple[tuple[str, str], ...] = (
     ("✎", "mock.edit"), ("🗑", "mock.delete"), ("🖶", "mock.print"), ("⋮", "mock.more"), ("⛶", "mock.fullscreen"),
 )
 BASIS_SECTION = "Basis"
-MAX_COLUMNS = 5
 DEFAULT_COLUMN_WIDTH = 8.43  # Excel-standaard / Excel default
 STRETCH_SCALE = 10
 RADIUS = 4
@@ -48,6 +47,7 @@ class PassportMockup(QFrame):
         self._tab: PassportTab | None = None
         self._object_type = ""
         self._widths: list[float] = []
+        self._positions: dict[tuple[int, int, int], tuple[int, int]] = {}
         self._highlights: dict[str, str] = {}
         self.show_extra_tabs = True
         self._root = QVBoxLayout(self)
@@ -62,14 +62,20 @@ class PassportMockup(QFrame):
         palette: Palette,
         column_widths: list[float] | None = None,
         highlights: dict[str, str] | None = None,
+        positions: dict[tuple[int, int, int], tuple[int, int]] | None = None,
     ) -> None:
-        """(Her)teken de mockup. ``column_widths`` (Excel-tekens, bij een import) bepaalt de verhouding van de
-        rasterkolommen; ``highlights`` koppelt een genormaliseerde veldnaam aan een soort verschil (omlijning).
-        (Re)draw the mockup. ``column_widths`` (Excel characters, for an import) sets the grid column proportions;
+        """(Her)teken de mockup. Zoals in iAsset strekt elke rij haar N kolommen over de volle breedte. Bij een
+        import bepalen ``column_widths`` (Excel-tekens) en ``positions`` ((sectie, rij, cel) -> (Excel-rij,
+        -kolom)) de verhouding: een cel krijgt de breedte van de Excel-kolom waarin hij staat; anders zijn de kolommen
+        gelijk. ``highlights`` koppelt een genormaliseerde veldnaam aan een soort verschil (omlijning).
+        (Re)draw the mockup. As in iAsset every row stretches its N columns across the full width. For an import
+        ``column_widths`` (Excel characters) and ``positions`` ((section, row, cell) -> (Excel row, column)) set the
+        proportions: a cell gets the width of the Excel column it sits in; otherwise columns are equal.
         ``highlights`` maps a normalised field name to a kind of difference (outline)."""
         self._tab, self._object_type, self._palette = tab, object_type, palette
         self._widths = [w for w in (column_widths or [])]
         self._highlights = dict(highlights or {})
+        self._positions = dict(positions or {})
         while self._root.count():
             item = self._root.takeAt(0)
             widget = item.widget() if item else None
@@ -95,7 +101,9 @@ class PassportMockup(QFrame):
         """Volledige mockup (zonder scrollen) als afbeelding. / Full mockup (without scrolling) as an image."""
         full = PassportMockup(scrollable=False)
         full.show_extra_tabs = self.show_extra_tabs
-        full.show_tab(self._tab, self._object_type, self._palette, self._widths, self._highlights)
+        full.show_tab(
+            self._tab, self._object_type, self._palette, self._widths, self._highlights, self._positions,
+        )
         full.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
         full.ensurePolished()
         layout = full.layout()
@@ -106,22 +114,18 @@ class PassportMockup(QFrame):
         full.deleteLater()
         return pixmap
 
-    def column_stretch(self, tab: PassportTab | None = None) -> list[int]:
-        """Stretchfactoren van de rasterkolommen (gelijk, of naar Excel-breedte bij een import).
-        Stretch factors of the grid columns (equal, or from the Excel widths for an import)."""
-        count = self._column_count(tab or self._tab)
-        if not self._widths:
-            return [1] * count
-        widths = [w if w > 0 else DEFAULT_COLUMN_WIDTH for w in self._widths[:count]]
-        widths += [DEFAULT_COLUMN_WIDTH] * (count - len(widths))
-        return [max(1, round(w * STRETCH_SCALE)) for w in widths]
-
-    @staticmethod
-    def _column_count(tab: PassportTab | None) -> int:
-        if tab is None:
-            return MAX_COLUMNS
-        longest = max((len(row) for s in tab.sections for row in s.rows), default=1)
-        return max(1, min(MAX_COLUMNS, longest))
+    def row_stretch(self, section: int, row: int, cells: list[int]) -> list[int]:
+        """Stretchfactoren voor de cellen ``cells`` (indices in rij ``row`` van sectie ``section``): de Excel-breedte
+        van hun kolom bij een import, anders gelijk. Stretch factors for ``cells`` (indices in the row): the Excel
+        width of their column for an import, otherwise equal."""
+        if not self._widths or not self._positions:
+            return [1] * len(cells)
+        result: list[int] = []
+        for index in cells:
+            position = self._positions.get((section, row, index))
+            width = self._widths[position[1] - 1] if position and 0 < position[1] <= len(self._widths) else 0.0
+            result.append(max(1, round((width if width > 0 else DEFAULT_COLUMN_WIDTH) * STRETCH_SCALE)))
+        return result
 
     # --- opbouw / construction -------------------------------------------------------------------------------
 
@@ -200,7 +204,7 @@ class PassportMockup(QFrame):
         for index, section in enumerate(sections):
             if index:
                 layout.addWidget(self._separator())
-            layout.addWidget(self._build_section(tab, section))
+            layout.addWidget(self._build_section(tab, section, index))
         layout.addStretch(1)
         return body
 
@@ -211,7 +215,7 @@ class PassportMockup(QFrame):
         line.setStyleSheet(f"QFrame#mockSeparator {{ background: {self._palette.separator}; border: none; }}")
         return line
 
-    def _build_section(self, tab: PassportTab, section: Section) -> QWidget:
+    def _build_section(self, tab: PassportTab, section: Section, section_index: int) -> QWidget:
         p = self._palette
         wrapper = QWidget()
         layout = QVBoxLayout(wrapper)
@@ -232,15 +236,14 @@ class PassportMockup(QFrame):
                     note.setStyleSheet(f"color: {p.muted}; font-size: 9pt; padding: 2px 6px; background: transparent;")
                     layout.addWidget(note)
             return wrapper
-        columns = self._column_count(tab)
-        stretch = self.column_stretch(tab)
         for index, row in enumerate(section.rows):
             # Velden die niet voor het gekozen objecttype gelden worden verborgen.
             # Fields that do not apply to the chosen object type are hidden.
-            visible = [c for c in row if not self._object_type or tab.applicable(c.label, self._object_type)]
-            if row and not visible:
+            kept = [i for i, c in enumerate(row) if not self._object_type or tab.applicable(c.label, self._object_type)]
+            if row and not kept:
                 continue
-            layout.addWidget(self._build_row(tab, section, visible, columns, stretch))
+            stretch = self.row_stretch(section_index, index, kept)
+            layout.addWidget(self._build_row(tab, section, [row[i] for i in kept], stretch))
             remark = section.margin.get(index)
             if remark:
                 note = QLabel(remark)
@@ -253,7 +256,7 @@ class PassportMockup(QFrame):
         return wrapper
 
     def _build_row(
-        self, tab: PassportTab, section: Section, row: list[Cell], columns: int, stretch: list[int],
+        self, tab: PassportTab, section: Section, row: list[Cell], stretch: list[int],
     ) -> QWidget:
         p = self._palette
         if not row:
@@ -266,11 +269,10 @@ class PassportMockup(QFrame):
         grid.setContentsMargins(0, 0, 0, 0)
         grid.setHorizontalSpacing(0)
         grid.setVerticalSpacing(6)
-        for column in range(max(columns, len(row))):
-            grid.setColumnStretch(column, stretch[column] if column < len(stretch) else 1)
-            cell = row[column] if column < len(row) else None
-            colour = self._highlights.get(label_key(cell.label)) if cell is not None and self._highlights else None
-            head = QLabel(self._caption(cell) if cell is not None else "")
+        for column, cell in enumerate(row):
+            grid.setColumnStretch(column, stretch[column])
+            colour = self._highlights.get(label_key(cell.label)) if self._highlights else None
+            head = QLabel(self._caption(cell))
             head.setObjectName("mockHead")
             head.setAlignment(Qt.AlignmentFlag.AlignCenter)
             head.setWordWrap(True)
@@ -283,8 +285,6 @@ class PassportMockup(QFrame):
             head.setMinimumWidth(0)
             head.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
             grid.addWidget(head, 0, column)
-            if cell is None:
-                continue
             value = QLabel(self._sample(section, cell))
             value.setObjectName("mockValue")
             value.setMinimumHeight(26)

@@ -170,8 +170,9 @@ def wait_for_jobs() -> None:
 
     pool = QThreadPool.globalInstance()
     assert pool is not None
-    pool.waitForDone()
-    QApplication.processEvents()
+    for _ in range(3):  # een afgeronde taak kan een volgende starten / a finished job may start another
+        pool.waitForDone()
+        QApplication.processEvents()
 
 
 @pytest.fixture
@@ -283,9 +284,11 @@ def test_imported_tab_uses_excel_widths_for_grid_columns(window, exported_file):
     rows = [w for w in window.mockup.findChildren(QWidget, "mockRow") if w.layout() is not None]
     assert rows
     grid = rows[0].layout()
-    expected = window.mockup.column_stretch()
-    assert [grid.columnStretch(i) for i in range(len(expected))] == expected
-    assert expected == [max(1, round(w * 10)) for w in widths[: len(expected)]]
+    sheet = window.imported_sheets[0].sheet
+    first = next(i for i, w in enumerate(window.mockup.findChildren(QWidget, "mockRow")) if w.layout() is not None)
+    count = grid.count() // 2
+    columns = [sheet.positions[(0, first, i)][1] for i in range(count)]
+    assert [grid.columnStretch(i) for i in range(count)] == [max(1, round(widths[c - 1] * 10)) for c in columns]
 
 
 def test_id_check_dialog_from_synthetic_catalog(window, tmp_path):
@@ -333,6 +336,7 @@ def test_check_field_ids_uses_loaded_catalog_or_asks(window, tmp_path, monkeypat
     assert window.ids is not None and window.ids.catalog is not None
     assert "1 field IDs loaded" in window.statusBar().currentMessage()
     window.check_field_ids()  # nu direct met de geladen catalogus / now directly with the loaded catalog
+    wait_for_jobs()
     assert len(shown) == 2
 
 
@@ -351,6 +355,7 @@ def test_annotation_dialog_with_report_and_fix(window, exported_file, monkeypatc
     assert dialog.table.rowCount() == 1 and detail is not None and detail.text() == "(2) should be (1)"
     assert dialog.info_label.isHidden() and dialog.fix_button.isEnabled()
     dialog.run_fix()
+    wait_for_jobs()
     assert not dialog.result_box.isHidden() and "design_fixed.xlsx" in dialog.result_box.toPlainText()
     assert dialog.table.rowCount() == 0
     assert not AnnotationDialog(report, False, None, window).info_label.isHidden()
@@ -360,3 +365,78 @@ def test_annotation_dialog_with_report_and_fix(window, exported_file, monkeypatc
     window.run_annotation_check(str(exported_file))
     wait_for_jobs()
     assert len(shown) == 1 and isinstance(shown[0], AnnotationDialog)
+
+
+def test_merge_is_disabled_for_imported_design(window, exported_file):
+    assert window.merge_selected_action.isEnabled() and window.apply_button.isEnabled()
+    window.apply_import(window.read_refined_with_diff(str(exported_file)))
+    for widget in (window.merge_selected_action, window.merge_selected_button, window.apply_button,
+                   window.reset_button):
+        assert not widget.isEnabled()
+    assert "generated design" in window.merge_selected_button.toolTip()
+    tabs = list(window.tabs)
+    window.merge_selected()
+    window.apply_selected_merge()
+    window.reset_merges()
+    assert window.imported is not None and window.tabs == tabs
+    window.back_to_generated()
+    assert window.merge_selected_action.isEnabled() and window.merge_selected_button.isEnabled()
+    assert window.apply_button.isEnabled() and window.reset_button.isEnabled()
+
+
+def test_manual_merge_reports_when_nothing_was_merged(window):
+    window._apply_manual_merge("Spook", ["Bord", "Bestaat niet"])
+    assert "not applied" in window.statusBar().currentMessage()
+    assert window.applied_merges == [] and not any(t.merged_from for t in window.tabs)
+    window._apply_manual_merge("Mix", ["Bord", "Verharding"])
+    assert window.statusBar().currentMessage() == "Merged into Mix."
+
+
+def test_id_check_and_annotation_fix_run_in_background(window, monkeypatch):
+    from passport_designer.field_catalog import FieldCatalog, FieldInfo
+    from passport_designer.ui.id_check_dialog import IdCheckDialog
+
+    shown: list[object] = []
+    monkeypatch.setattr(window, "_exec_dialog", lambda dialog: shown.append(dialog) or 0)
+    catalog = FieldCatalog(source="t.xlsx")
+    catalog.entries = {5: FieldInfo(5, "bordcode", "pulldown", "select")}
+    window.show_id_check(catalog)
+    assert shown == [] and window._busy  # nog niet klaar: loopt op een werkthread / runs on a worker thread
+    wait_for_jobs()
+    assert len(shown) == 1 and isinstance(shown[0], IdCheckDialog) and not window._busy
+
+    warned: list[str] = []
+    monkeypatch.setattr(window, "_warn", warned.append)
+
+    def boom(*_a):
+        raise RuntimeError("kapot")
+
+    monkeypatch.setattr("passport_designer.ui.main_window.check_ids", boom)
+    window.show_id_check(catalog)
+    wait_for_jobs()
+    assert len(shown) == 1 and not window._busy and "kapot" in warned[0]
+
+
+def test_annotation_fix_runs_in_job_and_shows_warnings(window, exported_file, monkeypatch):
+    from passport_designer.annotations import AnnotationReport, FixResult
+    from passport_designer.ui import annotation_dialog
+    from passport_designer.ui.annotation_dialog import AnnotationDialog
+
+    report = AnnotationReport(exported_file, [], ["Bord"])
+    result = FixResult(exported_file.with_name("x_fixed.xlsx"), [], report, ["tekeningen gaan verloren"])
+    dialog = AnnotationDialog(report, True, lambda: result, window)
+    dialog.run_fix()
+    assert dialog.result_box.isHidden() and not dialog.fix_button.isEnabled()
+    wait_for_jobs()
+    assert "tekeningen gaan verloren" in dialog.result_box.toPlainText() and dialog.fix_button.isEnabled()
+
+    errors: list[str] = []
+    monkeypatch.setattr(annotation_dialog.QMessageBox, "warning", lambda *a: errors.append(a[2]))
+
+    def boom():
+        raise ValueError("nee")
+
+    failing = AnnotationDialog(report, True, boom, window)
+    failing.run_fix()
+    wait_for_jobs()
+    assert errors and "nee" in errors[0] and failing.fix_button.isEnabled()

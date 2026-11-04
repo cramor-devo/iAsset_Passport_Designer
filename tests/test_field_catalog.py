@@ -117,3 +117,29 @@ def test_no_network_imports():
         text = (root / name).read_text(encoding="utf-8")
         for banned in ("socket", "urllib", "requests", "http.client"):
             assert banned not in text, f"{name} references {banned}"
+
+
+class _CountingDict(dict):
+    scans = 0
+
+    def values(self):
+        type(self).scans += 1
+        return super().values()
+
+
+def test_by_label_and_subtheme_lookups_use_an_index():
+    from passport_designer.field_catalog import FieldCatalog, FieldInfo
+
+    catalog = FieldCatalog()
+    catalog.entries = _CountingDict({i: FieldInfo(i, f"Veld {i % 50}") for i in range(500)})
+    catalog.subtheme_names = {1: "Bord", 2: " bord ", 3: "Paal"}
+    assert len(catalog.by_label("veld 7")) == 10 and catalog.subthemes_for_name("BORD") == {1, 2}
+    scans = _CountingDict.scans
+    for _ in range(200):
+        catalog.by_label("Veld 3")
+        catalog.subthemes_for_name("paal")
+    assert _CountingDict.scans == scans  # geen volledige scans meer / no full scans any more
+    catalog.entries[999] = FieldInfo(999, "Veld 7")  # index vervalt bij nieuwe velden / index follows new entries
+    catalog.subtheme_names[4] = "Bord"
+    assert len(catalog.by_label("veld 7")) == 11 and catalog.subthemes_for_name("bord") == {1, 2, 4}
+    assert catalog.by_label("") == [] and catalog.subthemes_for_name("") == set()
