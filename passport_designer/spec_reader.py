@@ -11,7 +11,7 @@ from zipfile import BadZipFile
 from openpyxl import load_workbook
 from openpyxl.utils.exceptions import InvalidFileException
 
-from .models import DEFAULT_FILTER_COLUMNS, ObjectType, SpecModel, norm
+from .models import DEFAULT_FILTER_COLUMNS, ObjectType, RawSheet, SpecModel, norm
 
 log = logging.getLogger(__name__)
 
@@ -58,6 +58,25 @@ def _rows_with_header(
     raise SpecError(f"Header row with columns {', '.join(wanted)} not found.")
 
 
+def _raw_sheet(source: str, rows: list[tuple[object, ...]], required: tuple[str, ...]) -> RawSheet | None:
+    """Kopregel en rijen van een blad ongewijzigd bewaren (voor de bronbladen in de export).
+    Keep the header row and rows of a sheet unchanged (for the reference sheets in the export)."""
+    for index, row in enumerate(rows[:HEADER_SCAN_ROWS]):
+        keys = {norm(_text(value)) for value in row}
+        if all(name in keys for name in required):
+            width = len(row)
+            while width and not _text(row[width - 1]):
+                width -= 1
+            header = [_text(value) for value in row[:width]]
+            body = [
+                tuple(r[i] if i < len(r) else None for i in range(width))
+                for r in rows[index + 1 :]
+                if any(_text(v) for v in r)
+            ]
+            return RawSheet(source, header, body)
+    return None
+
+
 def read_spec(path: str | Path, progress: ProgressCallback | None = None) -> SpecModel:
     """Lees een specificatiebestand. Verwacht de tabbladen 'Objecttypen' (Objecttype + Filter, Zoekfilter of Fase)
     en 'Attributen' (Objecttype, Attribuut).
@@ -77,10 +96,16 @@ def read_spec(path: str | Path, progress: ProgressCallback | None = None) -> Spe
         spec = SpecModel(sources=[file_path.name])
         if progress:
             progress(f"{file_path.name}: Objecttypen")
-        _read_object_types(workbook[types_name].iter_rows(values_only=True), spec)
+        type_rows: list[tuple[object, ...]] = list(workbook[types_name].iter_rows(values_only=True))
+        _read_object_types(iter(type_rows), spec)
         if progress:
             progress(f"{file_path.name}: Attributen")
-        _read_attributes(workbook[attrs_name].iter_rows(values_only=True), spec)
+        attr_rows: list[tuple[object, ...]] = list(workbook[attrs_name].iter_rows(values_only=True))
+        _read_attributes(iter(attr_rows), spec)
+        for key, rows in (("objecttypen", type_rows), ("attributen", attr_rows)):
+            raw = _raw_sheet(file_path.name, rows, ("objecttype",))
+            if raw is not None:
+                spec.raw_sheets[key] = [raw]
     finally:
         workbook.close()
     log.info("Loaded %s: %d types, %d with attributes", file_path.name, len(spec.object_types), len(spec.attributes))

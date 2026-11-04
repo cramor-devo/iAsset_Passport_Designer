@@ -13,6 +13,7 @@ from zipfile import BadZipFile
 from openpyxl import load_workbook
 from openpyxl.utils.exceptions import InvalidFileException
 
+from .field_catalog import CatalogError, FieldCatalog, catalog_from_records, is_gui_catalog, load_gui_catalog
 from .models import norm
 
 log = logging.getLogger(__name__)
@@ -32,6 +33,7 @@ class FieldIdMap:
         self._ids: dict[str, int] = {}
         self.ambiguous: set[str] = set()
         self.source = ""
+        self.catalog: FieldCatalog | None = None
 
     def __len__(self) -> int:
         return len(self._ids)
@@ -55,19 +57,28 @@ class FieldIdMap:
     def from_file(cls, path: str | Path) -> FieldIdMap:
         file_path = Path(path)
         suffix = file_path.suffix.lower()
+        catalog: FieldCatalog | None = None
         try:
             if suffix == ".json":
                 records = _records_from_json(file_path)
+                catalog = catalog_from_records(records, file_path.name)
             elif suffix == ".csv":
                 records = _records_from_csv(file_path)
+                if records and {"type", "values", "themes"} & {norm(k) for k in records[0]}:
+                    catalog = catalog_from_records(records, file_path.name)
             elif suffix in (".xlsx", ".xlsm"):
-                records = _records_from_xlsx(file_path)
+                if is_gui_catalog(file_path):
+                    catalog = load_gui_catalog(file_path)
+                    records = [{"label": i.label, "id": i.id} for i in catalog.entries.values()]
+                else:
+                    records = _records_from_xlsx(file_path)
             else:
                 raise FieldMapError(f"Unsupported file type: {suffix or file_path.name}")
-        except (OSError, ValueError, InvalidFileException, KeyError, BadZipFile) as exc:
+        except (OSError, ValueError, InvalidFileException, KeyError, BadZipFile, CatalogError) as exc:
             raise FieldMapError(f"Cannot read {file_path.name}: {exc}") from exc
         mapping = cls()
         mapping.source = file_path.name
+        mapping.catalog = catalog if catalog is not None and len(catalog) else None
         for record in records:
             label = _pick(record, LABEL_KEYS)
             raw_id = _pick(record, ID_KEYS)

@@ -8,12 +8,14 @@ import re
 from collections.abc import Callable
 from pathlib import Path
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QPoint, Qt
 from PyQt6.QtGui import QAction, QActionGroup, QCloseEvent, QFont, QGuiApplication, QKeySequence
 from PyQt6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
     QCheckBox,
     QComboBox,
+    QDialog,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -39,7 +41,7 @@ from ..excel_export import export_merge_report, export_workbook
 from ..field_map import FieldIdMap, FieldMapError
 from ..i18n import LANGUAGES, tr, translator
 from ..layout_engine import LayoutEngine, LayoutOptions
-from ..merge_advisor import DEFAULT_THRESHOLD, MergeSuggestion, apply_merges, suggest_merges
+from ..merge_advisor import DEFAULT_THRESHOLD, MergeSuggestion, apply_merges, manual_merge_info, suggest_merges
 from ..models import PassportTab, Severity, SpecModel
 from ..payload import (
     ENDPOINT,
@@ -53,6 +55,7 @@ from ..payload import (
 from ..profiles import DEFAULT_PROFILE, PROFILES, DesignProfile
 from ..settings import AppSettings, data_dir
 from ..spec_reader import SpecError, read_spec
+from .merge_dialog import MergeDialog
 from .mockup import PassportMockup
 from .settings_dialog import PayloadSettingsDialog
 from .sheet_preview import SheetPreview
@@ -116,6 +119,9 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(self.column_combo)
         self.filter_label = QLabel()
         self.filter_list = QListWidget()
+        self.filter_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.filter_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.filter_list.customContextMenuRequested.connect(self._show_filter_menu)
         self.filter_label.setBuddy(self.filter_list)
         self.filter_list.currentRowChanged.connect(self._on_filter_changed)
         self.type_label = QLabel()
@@ -181,9 +187,11 @@ class MainWindow(QMainWindow):
         self.apply_button.clicked.connect(self.apply_selected_merge)
         self.reset_button = QPushButton()
         self.reset_button.clicked.connect(self.reset_merges)
+        self.merge_selected_button = QPushButton()
+        self.merge_selected_button.clicked.connect(self.merge_selected)
         self.merge_export_button = QPushButton()
         self.merge_export_button.clicked.connect(self.export_merge_matrix)
-        for button in (self.preview_button, self.apply_button, self.reset_button):
+        for button in (self.preview_button, self.apply_button, self.merge_selected_button, self.reset_button):
             buttons.addWidget(button)
         buttons.addStretch(1)
         buttons.addWidget(self.merge_export_button)
@@ -248,6 +256,7 @@ class MainWindow(QMainWindow):
         self.png_action = self._action("action.export_png", self.export_png, "Ctrl+P")
         self.payload_action = self._action("action.save_payload", self.save_payload, QKeySequence.StandardKey.Save)
         self.all_payload_action = self._action("action.save_all_payloads", self.save_all_payloads, "Ctrl+Shift+S")
+        self.merge_selected_action = self._action("action.merge_selected", self.merge_selected, "Ctrl+M")
         self.quit_action = self._action("action.quit", self.close, QKeySequence.StandardKey.Quit)
         for action in (self.open_action, self.add_action, self.ids_action):
             self.file_menu.addAction(action)
@@ -256,6 +265,8 @@ class MainWindow(QMainWindow):
             self.excel_action, self.excel_types_action, self.png_action, self.payload_action, self.all_payload_action,
         ):
             self.file_menu.addAction(action)
+        self.file_menu.addSeparator()
+        self.file_menu.addAction(self.merge_selected_action)
         self.file_menu.addSeparator()
         self.file_menu.addAction(self.quit_action)
 
@@ -329,6 +340,8 @@ class MainWindow(QMainWindow):
         self.preview_button.setText(tr("merge.preview"))
         self.apply_button.setText(tr("merge.apply"))
         self.reset_button.setText(tr("merge.reset"))
+        self.merge_selected_button.setText(tr("merge.selected"))
+        self.merge_selected_button.setToolTip(tr("merge.selected_tip"))
         self.merge_export_button.setText(tr("merge.export"))
         columns = ("name", "similarity", "types", "fields", "fit")
         self.merge_tree.setHeaderLabels([tr(f"merge.col.{c}") for c in columns])
@@ -604,6 +617,64 @@ class MainWindow(QMainWindow):
         self.applied_merges.append((suggestion.name, list(suggestion.members)))
         self._rebuild_designs()
         self.statusBar().showMessage(tr("merge.applied", name=suggestion.name))
+
+    def _show_filter_menu(self, pos: QPoint) -> None:
+        """Contextmenu van de paspoortlijst. / Context menu of the passport list."""
+        menu = QMenu(self)
+        menu.addAction(self.merge_selected_action)
+        viewport = self.filter_list.viewport()
+        if viewport is not None:
+            menu.exec(viewport.mapToGlobal(pos))
+
+    def _expand_members(self, names: list[str]) -> list[str]:
+        """Vervang samengevoegde paspoorten door hun filters. / Replace merged passports by their filters."""
+        by_name = {t.name: t for t in self.tabs}
+        members: list[str] = []
+        for name in names:
+            tab = by_name.get(name)
+            for member in (tab.merged_from if tab and tab.merged_from else [name]):
+                if member not in members:
+                    members.append(member)
+        return members
+
+    def _taken_names(self, members: list[str]) -> set[str]:
+        """Bestaande paspoortnamen, zonder de samen te voegen paspoorten. / Existing names minus those being merged."""
+        merging = set(members) | {t.name for t in self.tabs if t.merged_from and set(t.merged_from) & set(members)}
+        return {t.name for t in self.tabs if t.name not in merging}
+
+    def _merge_dialog_for(self, names: list[str]) -> MergeDialog | None:
+        """Bouw de samenvoegdialoog zonder die te tonen. / Build the merge dialog without showing it."""
+        if self.spec is None or self.engine is None:
+            return None
+        members = self._expand_members(names)
+        if len(members) < 2:
+            return None
+        taken = self._taken_names(members)
+        info = manual_merge_info(self.spec, self.engine, members, taken)
+        return MergeDialog(info, taken, self)
+
+    def _apply_manual_merge(self, name: str, names: list[str]) -> None:
+        """Voeg de paspoorten samen onder ``name``; eerdere samenvoegingen van de leden vervallen.
+        Merge the passports under ``name``; earlier merges of those members are replaced."""
+        members = self._expand_members(names)
+        self.applied_merges = [m for m in self.applied_merges if not set(m[1]) & set(members)]
+        self.applied_merges.append((name, members))
+        self._rebuild_designs()
+        for row, tab in enumerate(self.tabs):
+            if tab.name == name:
+                self.filter_list.setCurrentRow(row)
+        self.statusBar().showMessage(tr("merge.applied", name=name))
+
+    def merge_selected(self) -> None:
+        """Voeg de geselecteerde paspoorten samen, ongeacht filter of groep. / Merge the selected passports."""
+        rows = sorted({self.filter_list.row(i) for i in self.filter_list.selectedItems()})
+        names = [self.tabs[r].name for r in rows if 0 <= r < len(self.tabs)]
+        dialog = self._merge_dialog_for(names) if len(names) > 1 else None
+        if dialog is None:
+            self._warn(tr("merge.need_two"))
+            return
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._apply_manual_merge(dialog.merge_name(), names)
 
     def reset_merges(self) -> None:
         self.applied_merges.clear()

@@ -121,3 +121,41 @@ def test_application_icon_renders(app):
     from passport_designer.ui.branding import application_icon
 
     assert not application_icon().pixmap(32, 32).isNull()
+
+
+def test_manual_merge_dialog_and_remerge(window):
+    from PyQt6.QtWidgets import QAbstractItemView
+
+    window._on_loaded(make_spec(), 1, True)
+    assert window.filter_list.selectionMode() == QAbstractItemView.SelectionMode.ExtendedSelection
+    names = [t.name for t in window.tabs]
+    assert names[:2] == ["Bord", "Informatiebord"]
+    window.filter_list.item(0).setSelected(True)
+    window.filter_list.item(2).setSelected(True)
+    assert len(window.filter_list.selectedItems()) == 2 and window.current_tab() is not None
+    dialog = window._merge_dialog_for(["Bord", "Paal"])
+    assert dialog is not None and dialog.info.groups_differ and not dialog.group_warning.isHidden()
+    assert dialog.cancel_button.isDefault() and not dialog.ok_button.isEnabled()
+    dialog.name_edit.setText("")
+    dialog.confirm_check.setChecked(True)
+    assert not dialog.ok_button.isEnabled()
+    dialog.name_edit.setText("Informatiebord")  # bestaat al / already exists
+    assert not dialog.ok_button.isEnabled()
+    dialog.name_edit.setText("Mix")
+    assert dialog.ok_button.isEnabled()
+    dialog.confirm_check.setChecked(False)
+    assert not dialog.ok_button.isEnabled()
+    dialog.confirm_check.setChecked(True)
+    window._apply_manual_merge(dialog.merge_name(), ["Bord", "Paal"])
+    merged = next(t for t in window.tabs if t.name == "Mix")
+    assert merged.merged_from == ["Bord", "Paal"]
+    assert window.applied_merges == [("Mix", ["Bord", "Paal"])]
+
+    again = window._merge_dialog_for(["Mix", "Informatiebord"])
+    assert again is not None and again.info.members == ["Bord", "Paal", "Informatiebord"]
+    again.name_edit.setText("Alles")
+    window._apply_manual_merge("Alles", ["Mix", "Informatiebord"])
+    assert window.applied_merges == [("Alles", ["Bord", "Paal", "Informatiebord"])]
+    assert [t.name for t in window.tabs][0] == "Alles"
+    window.reset_merges()
+    assert [t.name for t in window.tabs] == names

@@ -146,6 +146,66 @@ def merged_tab(spec: SpecModel, engine: LayoutEngine, members: list[str], name: 
     tab = engine.build(name, _unique_types(cluster), source_filters=[p.name for p in cluster])
     tab.merged_from = [p.name for p in cluster]
     return tab
+
+
+@dataclass
+class ManualMergeInfo:
+    """Gegevens voor het handmatig samenvoegen van gekozen filters (los van drempel en groep).
+    Data for manually merging chosen filters (independent of threshold and group)."""
+
+    members: list[str]
+    name: str
+    groups: dict[str, str]  # filter -> beheergroep / management group
+    similarity: float
+    total_fields: int
+    partial_fields: int
+    fits: list[MemberFit] = field(default_factory=list)
+
+    @property
+    def groups_differ(self) -> bool:
+        return len({g for g in self.groups.values() if g}) > 1
+
+    @property
+    def filters_differ(self) -> bool:
+        return len(self.members) > 1  # elk paspoort is een eigen filter / each passport is its own filter
+
+    @property
+    def needs_confirmation(self) -> bool:
+        return self.groups_differ or self.filters_differ
+
+
+def manual_merge_info(spec: SpecModel, engine: LayoutEngine, members: list[str], taken: set[str]) -> ManualMergeInfo:
+    """Beschrijf een handmatige samenvoeging; ``taken`` bevat bestaande namen (casefold) die niet gebruikt mogen worden.
+    Describe a manual merge; ``taken`` holds existing (casefolded) names that must not be reused."""
+    known = {p.name: p for p in profiles(spec, engine)}
+    cluster = [known[m] for m in members if m in known]
+    total = len(union_keys(cluster))
+    names = [p.name for p in cluster]
+    fits = [
+        MemberFit(p.name, len(p.object_types), len(p.attributes), len(p.attributes) / total if total else 1.0)
+        for p in cluster
+    ]
+    name = suggest_name(cluster, {t.casefold() for t in taken}) if cluster else ""
+    partial = len(merged_tab(spec, engine, names, name or "-").footnotes) if cluster else 0
+    return ManualMergeInfo(
+        names, name, {p.name: p.group for p in cluster},
+        _cluster_similarity(cluster), total, partial, fits,
+    )
+
+
+def validate_merge_name(name: str, existing: set[str]) -> str | None:
+    """Geef een i18n-sleutel met de fout, of None als de naam geldig is (bestaande namen: hoofdletterongevoelig).
+    Return an i18n key describing the error, or None if the name is valid (existing names: case-insensitive)."""
+    stripped = name.strip()
+    if not stripped:
+        return "merge.name_empty"
+    if len(stripped) > MAX_NAME:
+        return "merge.name_too_long"
+    if stripped.casefold() in {e.casefold() for e in existing}:
+        return "merge.name_duplicate"
+    return None
+
+
 def apply_merges(
     spec: SpecModel, engine: LayoutEngine, tabs: list[PassportTab], merges: list[tuple[str, list[str]]],
 ) -> list[PassportTab]:

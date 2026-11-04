@@ -181,6 +181,45 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "merge.previewing": {"en": "Preview of {name} (not applied).", "nl": "Voorbeeld van {name} (niet toegepast)."},
     "merge.applied": {"en": "Merged into {name}.", "nl": "Samengevoegd tot {name}."},
     "merge.reset_done": {"en": "All merges undone.", "nl": "Alle samenvoegingen ongedaan gemaakt."},
+    "action.merge_selected": {"en": "&Merge selected passports…", "nl": "Geselecteerde paspoorten &samenvoegen…"},
+    "merge.selected": {"en": "Merge selected…", "nl": "Selectie samenvoegen…"},
+    "merge.selected_tip": {
+        "en": "Select two or more passports in the list (Ctrl/Shift+click) and merge them, whatever their filter.",
+        "nl": "Selecteer twee of meer paspoorten in de lijst (Ctrl/Shift+klik) en voeg ze samen, ongeacht het filter.",
+    },
+    "merge.need_two": {
+        "en": "Select at least two passports in the list first.",
+        "nl": "Selecteer eerst minstens twee paspoorten in de lijst.",
+    },
+    "merge.dialog.title": {"en": "Merge passports", "nl": "Paspoorten samenvoegen"},
+    "merge.dialog.name": {"en": "Name of the combined passport:", "nl": "Naam van het gecombineerde paspoort:"},
+    "merge.dialog.members": {"en": "Passports to merge", "nl": "Samen te voegen paspoorten"},
+    "merge.dialog.col.filter": {"en": "Filter", "nl": "Filter"},
+    "merge.dialog.col.group": {"en": "Management group", "nl": "Beheergroep"},
+    "merge.dialog.col.fit": {"en": "Fit", "nl": "Pasvorm"},
+    "merge.dialog.info": {
+        "en": "Similarity {similarity}%; {common} common fields + {partial} per sub-theme.",
+        "nl": "Gelijkenis {similarity}%; {common} gemeenschappelijke velden + {partial} per subthema.",
+    },
+    "merge.dialog.warn_filters": {
+        "en": "These passports use different filters. Fields that do not apply to every filter get a footnote.",
+        "nl": "Deze paspoorten gebruiken verschillende filters. Velden die niet voor elk filter gelden krijgen een "
+        "voetnoot.",
+    },
+    "merge.dialog.warn_groups": {
+        "en": "WARNING: the passports belong to different management groups ({groups}).",
+        "nl": "LET OP: de paspoorten horen bij verschillende beheergroepen ({groups}).",
+    },
+    "merge.dialog.confirm": {"en": "Merge anyway / Toch samenvoegen", "nl": "Toch samenvoegen / Merge anyway"},
+    "merge.name_empty": {"en": "Enter a name.", "nl": "Vul een naam in."},
+    "merge.name_too_long": {
+        "en": "The name may be at most 50 characters.",
+        "nl": "De naam mag maximaal 50 tekens zijn.",
+    },
+    "merge.name_duplicate": {
+        "en": "A passport with this name already exists.", "nl": "Er bestaat al een paspoort met deze naam.",
+    },
+    "merge.none_group": {"en": "(none)", "nl": "(geen)"},
     "dialog.save_merge": {"en": "Save merge matrix", "nl": "Samenvoegmatrix opslaan"},
 }
 
