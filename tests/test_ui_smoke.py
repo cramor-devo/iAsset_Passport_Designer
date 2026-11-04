@@ -159,3 +159,204 @@ def test_manual_merge_dialog_and_remerge(window):
     assert [t.name for t in window.tabs][0] == "Alles"
     window.reset_merges()
     assert [t.name for t in window.tabs] == names
+
+
+# --- 0.4.0: ID-controle, import, vergelijking, annotaties / ID check, import, cross-reference, annotations ----------
+
+
+def wait_for_jobs() -> None:
+    """Wacht tot achtergrondtaken klaar zijn en lever hun signalen af. / Wait for background jobs, deliver signals."""
+    from PyQt6.QtCore import QThreadPool
+
+    pool = QThreadPool.globalInstance()
+    assert pool is not None
+    pool.waitForDone()
+    QApplication.processEvents()
+
+
+@pytest.fixture
+def exported_file(window, tmp_path, monkeypatch):
+    path = tmp_path / "design.xlsx"
+    monkeypatch.setattr(window, "_save_path", lambda *_a, **_k: str(path))
+    window.export_excel()
+    assert path.exists()
+    return path
+
+
+def crossref_texts(window) -> list[str]:
+    tree = window.crossref_panel.tree
+    texts: list[str] = []
+    for index in range(tree.topLevelItemCount()):
+        top = tree.topLevelItem(index)
+        texts.append(top.text(0))
+        texts += [top.child(i).text(0) for i in range(top.childCount())]
+    return texts
+
+
+def test_export_passes_spec_for_reference_sheets(window, exported_file, tmp_path, monkeypatch):
+    from openpyxl import load_workbook
+
+    names = load_workbook(exported_file).sheetnames
+    assert "Bron Objecttypen" in names and "Bron Attributen" in names and "_designer" in names
+    per_type = tmp_path / "per_type.xlsx"
+    monkeypatch.setattr(window, "_save_path", lambda *_a, **_k: str(per_type))
+    window.export_excel_per_type()
+    assert "Bron Objecttypen" in load_workbook(per_type).sheetnames
+
+
+def test_import_round_trip_in_window_has_no_differences(window, exported_file):
+    original = [t.name for t in window.tabs]
+    window.load_refined(str(exported_file))
+    wait_for_jobs()
+    assert window.imported is not None and not window._busy
+    assert [t.name for t in window.tabs] == original and window.filter_list.count() == len(original)
+    assert window.back_action.isEnabled() and "design.xlsx" in window.windowTitle()
+    assert all(entry.diff is not None and entry.diff.is_empty for entry in window.imported_sheets)
+    assert "No differences" in crossref_texts(window)
+    window._set_language("nl")
+    assert "Geen verschillen" in crossref_texts(window)
+    window._set_language("en")
+    # payload blijft werken op geïmporteerde tabs / payload works on imported tabs
+    assert "POST /passport-tabs" in window.payload_text.toPlainText()
+    window.back_to_generated()
+    assert window.imported is None and not window.back_action.isEnabled()
+    assert [t.name for t in window.tabs] == original and window.windowTitle() == "iAsset Passport Designer"
+
+
+def test_import_without_spec_and_with_changes(window, exported_file, wave1_spec):
+    window.spec = None
+    window.engine = None
+    result = window.read_refined_with_diff(str(exported_file))
+    assert result.diffs is None
+    window.apply_import(result)
+    assert "Load the specification" in window.crossref_panel.summary_label.text()
+    assert window.imported_sheets[0].diff is None
+    window.spec = wave1_spec
+    window._rebuild_designs()  # nieuwe specificatie/instelling: terug naar gegenereerd / back to generated
+    assert window.imported is None
+
+
+def test_import_marks_removed_added_fields_in_panel(window, tmp_path, exported_file):
+    from openpyxl import load_workbook
+
+    workbook = load_workbook(exported_file)
+    sheet = workbook["Bord"]
+    for row in sheet.iter_rows():
+        for cell in row:
+            if cell.value == "bordcode":
+                cell.value = "bordcode extra"
+    changed = tmp_path / "changed.xlsx"
+    workbook.save(changed)
+    window.apply_import(window.read_refined_with_diff(str(changed)))
+    texts = crossref_texts(window)
+    assert any(t.startswith("Bord (") and "No differences" not in t for t in texts)
+    kinds = {t for t in texts if t in {"Renamed", "Added", "Removed", "Not in spec"}}
+    assert kinds
+
+
+def test_highlight_toggle_default_off_and_png_clean(window, exported_file):
+    from passport_designer.crossref import DiffEntry, TabDiff
+
+    assert not window.highlight_action.isChecked()
+    window.apply_import(window.read_refined_with_diff(str(exported_file)))
+    entry = window.imported_sheets[0]
+    entry.diff = TabDiff(entries=[DiffEntry("bordcode", "added"), DiffEntry("hoogte", "moved")])
+    window._refresh_views()
+    assert window.current_highlights() == {} and window.mockup._highlights == {}
+    assert not window.mockup.render_pixmap().isNull()
+    window.highlight_action.setChecked(True)
+    window._on_highlight_toggled()
+    assert window.settings.boolean("view/highlight_changes", False)
+    assert window.mockup._highlights == {"bordcode": "added", "hoogte": "moved"}
+    assert not window.mockup.render_pixmap().isNull()
+    window.highlight_action.setChecked(False)
+    window._on_highlight_toggled()
+    assert window.mockup._highlights == {}
+
+
+def test_imported_tab_uses_excel_widths_for_grid_columns(window, exported_file):
+    window.apply_import(window.read_refined_with_diff(str(exported_file)))
+    widths = window.imported_sheets[0].sheet.column_widths
+    assert widths
+    from PyQt6.QtWidgets import QWidget
+
+    rows = [w for w in window.mockup.findChildren(QWidget, "mockRow") if w.layout() is not None]
+    assert rows
+    grid = rows[0].layout()
+    expected = window.mockup.column_stretch()
+    assert [grid.columnStretch(i) for i in range(len(expected))] == expected
+    assert expected == [max(1, round(w * 10)) for w in widths[: len(expected)]]
+
+
+def test_id_check_dialog_from_synthetic_catalog(window, tmp_path):
+    from openpyxl import load_workbook
+
+    from passport_designer.field_catalog import FieldCatalog, FieldInfo
+
+    catalog = FieldCatalog(source="t.xlsx")
+    catalog.entries = {
+        5: FieldInfo(5, "bordcode", "pulldown", "select"), 6: FieldInfo(6, "Hoogte", "cijferveld", "numeric"),
+    }
+    dialog = window.id_check_dialog_for(catalog)
+    total = len(dialog.findings)
+    assert total > 2 and dialog.table.rowCount() == total
+    header = dialog.table.horizontalHeaderItem(2)
+    assert header is not None and header.text() == "Label" and dialog.table.isSortingEnabled()
+    assert "fields checked" in dialog.summary_label.text()
+    assert dialog.table.columnCount() == 7
+    ids = {dialog.table.item(r, 3).text() for r in range(dialog.table.rowCount())}
+    assert "5" in ids
+    status = next(s for s in dialog.findings if s.status != "ok").status
+    dialog.status_combo.setCurrentIndex(dialog.status_combo.findData(status))
+    assert dialog.table.rowCount() == sum(1 for f in dialog.findings if f.status == status) < total
+    dialog.status_combo.setCurrentIndex(0)
+    dialog.severity_combo.setCurrentIndex(dialog.severity_combo.findData("error"))
+    assert dialog.table.rowCount() == sum(1 for f in dialog.findings if f.severity == "error")
+    out = tmp_path / "report.xlsx"
+    dialog.export_to(out)
+    assert load_workbook(out).worksheets[0].max_row == total + 1
+
+
+def test_check_field_ids_uses_loaded_catalog_or_asks(window, tmp_path, monkeypatch):
+    shown: list[object] = []
+    monkeypatch.setattr(window, "_exec_dialog", lambda dialog: shown.append(dialog) or 0)
+    source = tmp_path / "diverse.json"
+    source.write_text('[{"id": 7, "label": "bordcode", "type": "select", "themes": []}]', encoding="utf-8")
+    from PyQt6.QtWidgets import QFileDialog
+
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *_a, **_k: (str(source), ""))
+    window.check_field_ids()  # geen catalogus geladen: vraagt om bestand / no catalog: asks for a file
+    wait_for_jobs()
+    assert len(shown) == 1
+    window.load_ids_file(str(source))
+    wait_for_jobs()
+    assert window.ids is not None and window.ids.catalog is not None
+    assert "1 field IDs loaded" in window.statusBar().currentMessage()
+    window.check_field_ids()  # nu direct met de geladen catalogus / now directly with the loaded catalog
+    assert len(shown) == 2
+
+
+def test_annotation_dialog_with_report_and_fix(window, exported_file, monkeypatch):
+    pytest.importorskip("passport_designer.annotations")
+    from passport_designer.annotations import AnnotationIssue, AnnotationReport, FixResult
+    from passport_designer.ui.annotation_dialog import AnnotationDialog
+
+    report = AnnotationReport(
+        exported_file, [AnnotationIssue("Bord", "A5", "stale-number", "warning", "(2) should be (1)")], ["Bord"],
+    )
+    after = AnnotationReport(exported_file, [], ["Bord"])
+    result = FixResult(exported_file.with_name("design_fixed.xlsx"), ["Bord!A5: (2) → (1)"], after)
+    dialog = AnnotationDialog(report, window.spec is not None, lambda: result, window)
+    detail = dialog.table.item(0, 4)
+    assert dialog.table.rowCount() == 1 and detail is not None and detail.text() == "(2) should be (1)"
+    assert dialog.info_label.isHidden() and dialog.fix_button.isEnabled()
+    dialog.run_fix()
+    assert not dialog.result_box.isHidden() and "design_fixed.xlsx" in dialog.result_box.toPlainText()
+    assert dialog.table.rowCount() == 0
+    assert not AnnotationDialog(report, False, None, window).info_label.isHidden()
+
+    shown: list[object] = []
+    monkeypatch.setattr(window, "_exec_dialog", lambda d: shown.append(d) or 0)
+    window.run_annotation_check(str(exported_file))
+    wait_for_jobs()
+    assert len(shown) == 1 and isinstance(shown[0], AnnotationDialog)

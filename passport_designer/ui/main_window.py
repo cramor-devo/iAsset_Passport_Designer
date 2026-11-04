@@ -6,7 +6,9 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from PyQt6.QtCore import QPoint, Qt
 from PyQt6.QtGui import QAction, QActionGroup, QCloseEvent, QFont, QGuiApplication, QKeySequence
@@ -37,9 +39,12 @@ from PyQt6.QtWidgets import (
 )
 
 from .. import APP_NAME, __version__
+from ..crossref import TabDiff, changed_labels, diff_workbook
 from ..excel_export import export_merge_report, export_workbook
+from ..field_catalog import CatalogError, FieldCatalog, load_catalog
 from ..field_map import FieldIdMap, FieldMapError
 from ..i18n import LANGUAGES, tr, translator
+from ..id_check import check_ids
 from ..layout_engine import LayoutEngine, LayoutOptions
 from ..merge_advisor import DEFAULT_THRESHOLD, MergeSuggestion, apply_merges, manual_merge_info, suggest_merges
 from ..models import PassportTab, Severity, SpecModel
@@ -53,8 +58,12 @@ from ..payload import (
     to_json,
 )
 from ..profiles import DEFAULT_PROFILE, PROFILES, DesignProfile
+from ..refined_import import RefinedSheet, RefinedWorkbook, read_refined
 from ..settings import AppSettings, data_dir
 from ..spec_reader import SpecError, read_spec
+from .annotation_dialog import AnnotationDialog
+from .crossref_panel import CrossRefPanel
+from .id_check_dialog import IdCheckDialog
 from .merge_dialog import MergeDialog
 from .mockup import PassportMockup
 from .settings_dialog import PayloadSettingsDialog
@@ -67,6 +76,22 @@ log = logging.getLogger(__name__)
 FORMATS = ("payload.fmt_json", "payload.fmt_compact", "payload.fmt_form")
 SEVERITY_MARK = {Severity.INFO: "ℹ", Severity.WARNING: "⚠", Severity.ERROR: "⛔"}
 UNSAFE_FILENAME = re.compile(r'[<>:"/\\|?*\s]+')
+
+
+@dataclass
+class ImportedSheet:
+    """Een ingelezen blad met (optioneel) het verschil met de specificatie. / An imported sheet with its diff."""
+
+    sheet: RefinedSheet
+    diff: TabDiff | None = None
+
+
+@dataclass
+class ImportResult:
+    """Uitkomst van de import op de werkthread. / Result of the import on the worker thread."""
+
+    refined: RefinedWorkbook
+    diffs: list[tuple[str, TabDiff]] | None
 
 
 def safe_filename(name: str) -> str:
@@ -91,6 +116,8 @@ class MainWindow(QMainWindow):
         self.suggestions: list[MergeSuggestion] = []
         self.applied_merges: list[tuple[str, list[str]]] = []
         self._preview: PassportTab | None = None
+        self.imported: RefinedWorkbook | None = None
+        self.imported_sheets: list[ImportedSheet] = []
         self._busy = False
         self._actions: list[QAction] = []
         self._build_ui()
@@ -139,6 +166,7 @@ class MainWindow(QMainWindow):
 
         self.views = QTabWidget()
         self.mockup = PassportMockup()
+        self.mockup.show_extra_tabs = self.settings.boolean("view/extra_tabs", True)
         self.views.addTab(self.mockup, "")
         self.sheet_preview = SheetPreview()
         self.views.addTab(self.sheet_preview, "")
@@ -147,6 +175,8 @@ class MainWindow(QMainWindow):
         self.validation_list.setWordWrap(True)
         self.views.addTab(self.validation_list, "")
         self.views.addTab(self._build_merge_tab(), "")
+        self.crossref_panel = CrossRefPanel()
+        self.views.addTab(self.crossref_panel, "")
         splitter.addWidget(self.views)
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([320, 1040])
@@ -251,6 +281,11 @@ class MainWindow(QMainWindow):
         self.open_action = self._action("action.open", self.open_specs, QKeySequence.StandardKey.Open)
         self.add_action = self._action("action.add", self.add_spec, "Ctrl+Shift+O")
         self.ids_action = self._action("action.load_ids", self.load_ids, "Ctrl+I")
+        self.check_ids_action = self._action("action.check_ids", self.check_field_ids, "Ctrl+Shift+D")
+        self.import_action = self._action("action.import_refined", self.import_refined, "Ctrl+Shift+I")
+        self.back_action = self._action("action.back_generated", self.back_to_generated)
+        self.back_action.setEnabled(False)
+        self.annotations_action = self._action("action.check_annotations", self.check_annotations, "Ctrl+Shift+A")
         self.excel_action = self._action("action.export_excel", self.export_excel, "Ctrl+E")
         self.excel_types_action = self._action("action.export_excel_types", self.export_excel_per_type, "Ctrl+Shift+E")
         self.png_action = self._action("action.export_png", self.export_png, "Ctrl+P")
@@ -258,7 +293,10 @@ class MainWindow(QMainWindow):
         self.all_payload_action = self._action("action.save_all_payloads", self.save_all_payloads, "Ctrl+Shift+S")
         self.merge_selected_action = self._action("action.merge_selected", self.merge_selected, "Ctrl+M")
         self.quit_action = self._action("action.quit", self.close, QKeySequence.StandardKey.Quit)
-        for action in (self.open_action, self.add_action, self.ids_action):
+        for action in (self.open_action, self.add_action, self.ids_action, self.check_ids_action):
+            self.file_menu.addAction(action)
+        self.file_menu.addSeparator()
+        for action in (self.import_action, self.back_action, self.annotations_action):
             self.file_menu.addAction(action)
         self.file_menu.addSeparator()
         for action in (
@@ -270,6 +308,15 @@ class MainWindow(QMainWindow):
         self.file_menu.addSeparator()
         self.file_menu.addAction(self.quit_action)
 
+        self.highlight_action = self._action("action.highlight", self._on_highlight_toggled)
+        self.highlight_action.setCheckable(True)
+        self.highlight_action.setChecked(self.settings.boolean("view/highlight_changes", False))
+        self.extra_tabs_action = self._action("action.extra_tabs", self._on_extra_tabs_toggled)
+        self.extra_tabs_action.setCheckable(True)
+        self.extra_tabs_action.setChecked(self.mockup.show_extra_tabs)
+        self.view_menu.addAction(self.highlight_action)
+        self.view_menu.addAction(self.extra_tabs_action)
+        self.view_menu.addSeparator()
         self.theme_menu = self.view_menu.addMenu("") or QMenu()
         self.language_menu = self.view_menu.addMenu("") or QMenu()
         theme_group = QActionGroup(self)
@@ -311,9 +358,11 @@ class MainWindow(QMainWindow):
 
     def retranslate(self) -> None:
         """Zet alle teksten opnieuw volgens de gekozen taal. / Re-apply all texts for the chosen language."""
-        self.setWindowTitle(tr("app.title"))
+        self._update_title()
         for action in self._actions:
             action.setText(tr(str(action.data())))
+        self.highlight_action.setToolTip(tr("action.highlight_tip"))
+        self.crossref_panel.retranslate()
         self.file_menu.setTitle(tr("menu.file"))
         self.view_menu.setTitle(tr("menu.view"))
         self.settings_menu.setTitle(tr("menu.settings"))
@@ -331,7 +380,8 @@ class MainWindow(QMainWindow):
             self.type_combo.setItemText(0, tr("panel.all_types"))
         self.flagged_check.setText(tr("panel.only_flagged"))
         self.flagged_check.setToolTip(tr("panel.only_flagged_tip"))
-        for index, key in enumerate(("tab.mockup", "tab.sheet", "tab.payload", "tab.validation", "tab.merge")):
+        tab_keys = ("tab.mockup", "tab.sheet", "tab.payload", "tab.validation", "tab.merge", "tab.crossref")
+        for index, key in enumerate(tab_keys):
             self.views.setTabText(index, tr(key))
         self.threshold_label.setText(tr("merge.threshold"))
         self.same_group_check.setText(tr("merge.same_group"))
@@ -443,18 +493,275 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(tr("status.ready"))
 
     def load_ids(self) -> None:
+        """Kies een veld-ID-bestand (csv, json of iAsset-catalogus xlsx) en lees het op een werkthread.
+        Pick a field ID file (csv, json or iAsset catalog xlsx) and read it on a worker thread."""
         start = self.settings.string("paths/last", str(Path.home()))
         file, _ = QFileDialog.getOpenFileName(self, tr("dialog.load_ids"), start, tr("dialog.filter_ids"))
-        if not file:
+        if file:
+            self.load_ids_file(file)
+
+    def load_ids_file(self, path: str) -> None:
+        if self._busy:
             return
-        try:
-            self.ids = FieldIdMap.from_file(file)
-        except FieldMapError as exc:
-            log.warning("Field ID file failed: %s", exc)
-            self._warn(tr("error.read_ids", detail=str(exc)))
+        self._busy = True
+        self.settings.set("paths/last", str(Path(path).parent))
+        job = Job(lambda progress: self._read_ids(path, progress))
+        job.signals.progress.connect(self.statusBar().showMessage)
+        job.signals.finished.connect(self._on_ids_loaded)
+        job.signals.failed.connect(self._on_ids_failed)
+        run_job(job)
+
+    @staticmethod
+    def _read_ids(path: str, progress: Callable[[str], None]) -> FieldIdMap:
+        progress(tr("status.loading_ids", name=Path(path).name))
+        return FieldIdMap.from_file(path)
+
+    def _on_ids_loaded(self, mapping: object) -> None:
+        self._busy = False
+        if not isinstance(mapping, FieldIdMap):
             return
-        self.statusBar().showMessage(tr("status.ids_loaded", count=len(self.ids), name=self.ids.source))
+        self.ids = mapping
+        catalog = mapping.catalog
+        if catalog is None:
+            message = tr("status.ids_loaded", count=len(mapping), name=mapping.source)
+        else:
+            message = tr(
+                "status.ids_detail", count=len(mapping), name=mapping.source, subthemes=self._subtheme_text(catalog),
+            )
+        self.statusBar().showMessage(message)
         self._refresh_views()
+
+    @staticmethod
+    def _subtheme_text(catalog: FieldCatalog) -> str:
+        if catalog.has_subtheme_names:
+            return tr("ids.sub_names")
+        return tr("ids.sub_ids") if any(info.subthemes for info in catalog.entries.values()) else tr("ids.sub_none")
+
+    def _on_ids_failed(self, error: object) -> None:
+        self._busy = False
+        log.warning("Field ID file failed: %s", error)
+        detail = str(error) if isinstance(error, (FieldMapError, CatalogError)) else f"{type(error).__name__}: {error}"
+        self._warn(tr("error.read_ids", detail=detail))
+        self.statusBar().showMessage(tr("status.ready"))
+
+    # --- veld-ID-controle / field ID check -------------------------------------------------------------------
+
+    def check_field_ids(self) -> None:
+        """Controleer de ontwerpen tegen de geladen catalogus, of vraag om een catalogus-/JSON-bestand.
+        Check the designs against the loaded catalog, or ask for a catalog / JSON file."""
+        if not self._require_tabs():
+            return
+        if self.ids is not None and self.ids.catalog is not None:
+            self.show_id_check(self.ids.catalog)
+            return
+        start = self.settings.string("paths/last", str(Path.home()))
+        file, _ = QFileDialog.getOpenFileName(self, tr("dialog.load_ids_catalog"), start, tr("dialog.filter_catalog"))
+        if file:
+            self.load_catalog_for_check(file)
+
+    def load_catalog_for_check(self, path: str) -> None:
+        if self._busy:
+            return
+        self._busy = True
+        self.settings.set("paths/last", str(Path(path).parent))
+
+        def work(progress: Callable[[str], None]) -> FieldCatalog:
+            progress(tr("status.loading_ids", name=Path(path).name))
+            return load_catalog(path)
+
+        job = Job(work)
+        job.signals.progress.connect(self.statusBar().showMessage)
+        job.signals.finished.connect(self._on_catalog_for_check)
+        job.signals.failed.connect(self._on_catalog_failed)
+        run_job(job)
+
+    def _on_catalog_for_check(self, catalog: object) -> None:
+        self._busy = False
+        self.statusBar().showMessage(tr("status.ready"))
+        if isinstance(catalog, FieldCatalog):
+            self.show_id_check(catalog)
+
+    def _on_catalog_failed(self, error: object) -> None:
+        self._busy = False
+        log.warning("Field catalog failed: %s", error)
+        detail = str(error) if isinstance(error, (FieldMapError, CatalogError)) else f"{type(error).__name__}: {error}"
+        self._warn(tr("error.read_catalog", detail=detail))
+        self.statusBar().showMessage(tr("status.ready"))
+
+    def id_check_dialog_for(self, catalog: FieldCatalog) -> IdCheckDialog:
+        """Bouw de dialoog zonder die te tonen. / Build the dialog without showing it."""
+        return IdCheckDialog(check_ids(self.tabs, catalog, self.ids), self)
+
+    def show_id_check(self, catalog: FieldCatalog) -> None:
+        self._exec_dialog(self.id_check_dialog_for(catalog))
+
+    def _exec_dialog(self, dialog: QDialog) -> int:
+        """Eén plek om dialogen te tonen (tests vervangen deze). / Single place to show dialogs (tests replace it)."""
+        return dialog.exec()
+
+    # --- import van een bijgewerkt Excel-ontwerp / import of a refined Excel design --------------------------
+
+    def import_refined(self) -> None:
+        start = self.settings.string("paths/last", str(Path.home()))
+        file, _ = QFileDialog.getOpenFileName(self, tr("dialog.import_refined"), start, tr("dialog.filter_xlsx"))
+        if file:
+            self.load_refined(file)
+
+    def load_refined(self, path: str) -> None:
+        """Lees het ontwerp (en het verschil met de specificatie) op een werkthread.
+        Read the design (and the difference with the specification) on a worker thread."""
+        if self._busy:
+            return
+        self._busy = True
+        self.settings.set("paths/last", str(Path(path).parent))
+        job = Job(lambda progress: self.read_refined_with_diff(path, progress))
+        job.signals.progress.connect(self.statusBar().showMessage)
+        job.signals.finished.connect(self._on_refined_loaded)
+        job.signals.failed.connect(self._on_refined_failed)
+        run_job(job)
+
+    def read_refined_with_diff(self, path: str, progress: Callable[[str], None] | None = None) -> ImportResult:
+        if progress is not None:
+            progress(tr("import.loading", name=Path(path).name))
+        refined = read_refined(path, self.spec)
+        diffs = diff_workbook(refined, self.spec, self.engine) if self.spec and self.engine and refined.sheets else None
+        return ImportResult(refined, diffs)
+
+    def _on_refined_failed(self, error: object) -> None:
+        self._busy = False
+        log.warning("Refined import failed: %s", error)
+        self._warn(tr("error.read_refined", detail=f"{type(error).__name__}: {error}"))
+        self.statusBar().showMessage(tr("status.ready"))
+
+    def _on_refined_loaded(self, result: object) -> None:
+        self._busy = False
+        if isinstance(result, ImportResult):
+            self.apply_import(result)
+
+    def apply_import(self, result: ImportResult) -> None:
+        """Maak de ingelezen bladen het huidige ontwerp. / Make the imported sheets the current design."""
+        refined = result.refined
+        if not refined.sheets:
+            self._warn(tr("error.no_sheets"))
+            self.statusBar().showMessage(tr("status.ready"))
+            return
+        diffs = dict(result.diffs or [])
+        self.imported = refined
+        self.imported_sheets = [ImportedSheet(sheet, diffs.get(sheet.name)) for sheet in refined.sheets]
+        self.tabs = [entry.sheet.tab for entry in self.imported_sheets]
+        self._preview = None
+        self.back_action.setEnabled(True)
+        self._fill_filter_list()
+        self._update_title()
+        self.crossref_panel.show_report(
+            refined.path.name, result.diffs, self._import_warnings(), self.spec is not None,
+        )
+        changes = sum(len(d.entries) for _, d in result.diffs or [])
+        key = "import.done" if result.diffs is not None else "import.done_nospec"
+        self.statusBar().showMessage(tr(key, sheets=len(refined.sheets), name=refined.path.name, changes=changes))
+        self.views.setCurrentWidget(self.mockup)
+
+    def _import_warnings(self) -> list[str]:
+        if self.imported is None:
+            return []
+        warnings = list(self.imported.warnings)
+        for entry in self.imported_sheets:
+            warnings += [f"{entry.sheet.name}: {w}" for w in entry.sheet.warnings]
+        return warnings
+
+    def back_to_generated(self) -> None:
+        """Terug naar het uit de specificatie gegenereerde ontwerp. / Back to the design generated from the spec."""
+        if self.imported is None:
+            return
+        self._clear_import()
+        if self.spec is not None:
+            self._rebuild_designs()
+        else:
+            self.tabs = []
+            self._fill_filter_list()
+        self.statusBar().showMessage(tr("import.back_done"))
+
+    def _clear_import(self) -> None:
+        self.imported = None
+        self.imported_sheets = []
+        self.back_action.setEnabled(False)
+        self.crossref_panel.show_report("", None, [], self.spec is not None)
+        self._update_title()
+
+    def _update_title(self) -> None:
+        title = tr("app.title")
+        if self.imported is not None:
+            title += f" — {tr('import.window', name=self.imported.path.name)}"
+        self.setWindowTitle(title)
+
+    def _imported_entry(self, tab: PassportTab | None) -> ImportedSheet | None:
+        return next((e for e in self.imported_sheets if e.sheet.tab is tab), None) if tab is not None else None
+
+    def current_highlights(self, tab: PassportTab | None = None) -> dict[str, str]:
+        """Veldnaam -> soort verschil als de markering aan staat en het blad een verschil heeft.
+        Field name -> kind of difference when highlighting is on and the sheet has a diff."""
+        entry = self._imported_entry(tab or self.current_tab())
+        if not self.highlight_action.isChecked() or entry is None or entry.diff is None:
+            return {}
+        return changed_labels(entry.diff)
+
+    def _on_highlight_toggled(self) -> None:
+        self.settings.set("view/highlight_changes", self.highlight_action.isChecked())
+        self._refresh_views()
+
+    def _on_extra_tabs_toggled(self) -> None:
+        self.mockup.show_extra_tabs = self.extra_tabs_action.isChecked()
+        self.settings.set("view/extra_tabs", self.mockup.show_extra_tabs)
+        self._refresh_views()
+
+    # --- annotaties / annotations ----------------------------------------------------------------------------
+
+    def check_annotations(self) -> None:
+        start = self.settings.string("paths/last", str(Path.home()))
+        file, _ = QFileDialog.getOpenFileName(self, tr("dialog.check_annotations"), start, tr("dialog.filter_xlsx"))
+        if file:
+            self.run_annotation_check(file)
+
+    def run_annotation_check(self, path: str) -> None:
+        """Controleer de annotaties op een werkthread en toon de dialoog.
+        Check the annotations on a worker thread and show the dialog."""
+        if self._busy:
+            return
+        self._busy = True
+        self.settings.set("paths/last", str(Path(path).parent))
+
+        def work(progress: Callable[[str], None]) -> Any:
+            from .. import annotations
+
+            progress(tr("import.loading", name=Path(path).name))
+            return annotations.check_annotations(path, self.spec, self.engine)
+
+        job = Job(work)
+        job.signals.progress.connect(self.statusBar().showMessage)
+        job.signals.finished.connect(self._on_annotations_checked)
+        job.signals.failed.connect(self._on_annotations_failed)
+        run_job(job)
+
+    def _on_annotations_checked(self, report: object) -> None:
+        self._busy = False
+        self.statusBar().showMessage(tr("status.ready"))
+        self._exec_dialog(self.annotation_dialog_for(report))
+
+    def _on_annotations_failed(self, error: object) -> None:
+        self._busy = False
+        log.warning("Annotation check failed: %s", error)
+        self._warn(tr("error.annotations", detail=f"{type(error).__name__}: {error}"))
+        self.statusBar().showMessage(tr("status.ready"))
+
+    def annotation_dialog_for(self, report: Any) -> AnnotationDialog:
+        """Bouw de annotatiedialoog zonder die te tonen. / Build the annotation dialog without showing it."""
+
+        def fix() -> Any:
+            from .. import annotations
+
+            return annotations.fix_annotations(report.path, self.spec, self.engine)
+
+        return AnnotationDialog(report, self.spec is not None, fix, self)
 
     # --- ontwerp en weergave / design and display ------------------------------------------------------------
 
@@ -491,6 +798,8 @@ class MainWindow(QMainWindow):
     def _rebuild_designs(self) -> None:
         if self.spec is None:
             return
+        if self.imported is not None:
+            self._clear_import()
         current = self.current_tab()
         previous = current.name if current else ""
         self._preview = None
@@ -500,6 +809,10 @@ class MainWindow(QMainWindow):
         base = self.engine.build_all()
         self.tabs = apply_merges(self.spec, self.engine, base, self.applied_merges)
         self._update_suggestions()
+        self._fill_filter_list(previous)
+
+    def _fill_filter_list(self, previous: str = "") -> None:
+        """Vul de paspoortlijst met ``self.tabs`` en kies ``previous`` (of de eerste). / Fill the passport list."""
         self.filter_list.blockSignals(True)
         self.filter_list.clear()
         for tab in self.tabs:
@@ -542,7 +855,7 @@ class MainWindow(QMainWindow):
         The passport shown: for one object type without the fields that do not apply to it."""
         tab = self.current_tab()
         object_type = self.selected_object_type()
-        if tab is None or not object_type or self.engine is None:
+        if tab is None or not object_type or self.engine is None or self.imported is not None:
             return tab
         return self.engine.build_single(tab, object_type)
 
@@ -699,7 +1012,11 @@ class MainWindow(QMainWindow):
     def _refresh_views(self) -> None:
         tab = self.current_tab()
         shown = self.preview_tab()
-        self.mockup.show_tab(shown, self.selected_object_type(), PALETTES[self.theme_name])
+        entry = self._imported_entry(tab)
+        self.mockup.show_tab(
+            shown, self.selected_object_type(), PALETTES[self.theme_name],
+            entry.sheet.column_widths if entry else None, self.current_highlights(tab),
+        )
         self.sheet_preview.show_tab(shown)
         self.payload = build_tab_payload(tab, self.ids, self.options) if tab else None
         self._render_payload_text()
@@ -764,7 +1081,7 @@ class MainWindow(QMainWindow):
         if not path:
             return
         try:
-            export_workbook(self.tabs, path)
+            export_workbook(self.tabs, path, spec=self.spec)
         except (OSError, ValueError) as exc:
             log.exception("Excel export failed")
             self._warn(tr("error.write", detail=str(exc)))
@@ -776,13 +1093,16 @@ class MainWindow(QMainWindow):
         One sheet per object type, without the fields that do not apply to that object type."""
         if not self._require_tabs() or self.engine is None:
             return
+        if self.imported is not None:
+            self._warn(tr("error.export_imported_types"))
+            return
         path = self._save_path("dialog.save_excel", "Paspoortinrichting per objecttype.xlsx", "dialog.filter_xlsx")
         if not path:
             return
         engine = self.engine
         pairs = [(engine.build_single(tab, o.name), o.name) for tab in self.tabs for o in tab.object_types]
         try:
-            export_workbook([tab for tab, _ in pairs], path, [name for _, name in pairs])
+            export_workbook([tab for tab, _ in pairs], path, [name for _, name in pairs], spec=self.spec)
         except (OSError, ValueError) as exc:
             log.exception("Excel export failed")
             self._warn(tr("error.write", detail=str(exc)))
