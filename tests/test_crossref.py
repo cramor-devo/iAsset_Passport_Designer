@@ -140,3 +140,20 @@ def test_excel_edits_are_detected(tmp_path: Path, wave1_spec, edited):
     assert len(moved) == 1 and moved <= {"breedte", "aanlegjaar"}
     assert {label for label, _ in kinds} <= {"hoogte", "primaire kleuren", "spookveld", "breedte", "aanlegjaar"}
     assert diffs["Verharding"].is_empty
+
+
+def test_removed_occurrence_is_reported_when_label_remains_elsewhere():
+    generated = _tab({"Object informatie": ["aanlegjaar", "breedte"], "Constructielagen": ["aanlegjaar"]})
+    imported = _tab({"Object informatie": ["breedte"], "Constructielagen": ["aanlegjaar"]})
+    diff = diff_tab(imported, generated)
+    assert [(e.label, e.kind, e.from_section) for e in diff.entries] == [("aanlegjaar", REMOVED, "Object informatie")]
+    added = diff_tab(generated, imported)
+    assert [(e.label, e.kind, e.to_section) for e in added.entries] == [("aanlegjaar", ADDED, "Object informatie")]
+
+
+def test_one_place_moved_while_label_stays_elsewhere():
+    generated = _tab({"Basis": ["x"], "Object informatie": ["a"], "Overig": ["a"]})
+    imported = _tab({"Basis": ["x", "a"], "Object informatie": [], "Overig": ["a"]})
+    assert [(e.kind, e.from_section, e.to_section) for e in diff_tab(imported, generated).entries] == [
+        (MOVED, "Object informatie", "Basis"),
+    ]

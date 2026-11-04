@@ -68,6 +68,14 @@ class DesignProfile:
     basis_remark: str = ""
     basis_group_annotation: bool = True  # 'Beheergroep (Borden)' / 'Beheergroep (Borden)'
     relations: tuple[RelationSection, ...] = field(default=())
+    # Titelvoorvoegsels van secties die iAsset als gekoppeld-objectentabel toont (bijv. 'Memo (Sem.Rel)').
+    # Title prefixes of sections that iAsset shows as a linked-object table (e.g. 'Memo (Sem.Rel)').
+    table_sections: tuple[str, ...] = ("Memo",)
+
+    def is_table_section(self, title: str) -> bool:
+        """Toont iAsset deze sectie als tabel i.p.v. kolomkoppen? / Does iAsset show this section as a table?"""
+        lowered = title.casefold().strip()
+        return any(lowered.startswith(prefix.casefold()) for prefix in self.table_sections)
 
     @property
     def fixed_names(self) -> frozenset[str]:

@@ -158,6 +158,7 @@ def diff_tab(imported: PassportTab, generated: PassportTab, spec: SpecModel | No
         if key not in used_removed
     )
     entries.extend(_moved(imp, gen, imp_sections, gen_sections, imp_names, imp_titles, gen_titles))
+    entries.extend(_occurrences(imp, gen, imp_sections, gen_sections, imp_names, imp_titles, gen_titles))
 
     if spec is not None:
         allowed = _spec_attributes(imported, spec)
@@ -169,6 +170,32 @@ def diff_tab(imported: PassportTab, generated: PassportTab, spec: SpecModel | No
                     seen.add(key)
                     entries.append(DiffEntry(display, NOT_IN_SPEC, "", imp_titles.get(title, title)))
     return result
+
+
+def _occurrences(
+    imp: list[tuple[str, str, str]], gen: list[tuple[str, str, str]], imp_sections: dict[str, set[str]],
+    gen_sections: dict[str, set[str]], imp_names: dict[str, str], imp_titles: dict[str, str],
+    gen_titles: dict[str, str],
+) -> list[DiffEntry]:
+    """Velden die in beide ontwerpen staan en op een deel van de plekken overeenkomen: een plek die alleen in het
+    gegenereerde ontwerp staat is verwijderd, alleen in het ingelezen ontwerp toegevoegd (een verwijderde en een
+    toegevoegde plek van hetzelfde veld samen zijn verplaatst).
+    Fields in both designs that match at only some of their places: a place only in the generated design is
+    removed, only in the imported design added (a removed and an added place of one field together are moved)."""
+    entries: list[DiffEntry] = []
+    for key in dict.fromkeys(k for _, k, _ in imp):
+        if key not in gen_sections or not imp_sections[key] & gen_sections[key]:
+            continue  # niet gemeenschappelijk of al als verplaatst gemeld / not common or already reported as moved
+        gone = [t for t in dict.fromkeys(t for t, k, _ in gen if k == key) if t not in imp_sections[key]]
+        new = [t for t in dict.fromkeys(t for t, k, _ in imp if k == key) if t not in gen_sections[key]]
+        for old_title, new_title in zip(gone, new, strict=False):
+            source, target = gen_titles.get(old_title, old_title), imp_titles.get(new_title, new_title)
+            entries.append(DiffEntry(imp_names[key], MOVED, source, target, detail=f"{source} -> {target}"))
+        for title in gone[len(new):]:
+            entries.append(DiffEntry(imp_names[key], REMOVED, gen_titles.get(title, title)))
+        for title in new[len(gone):]:
+            entries.append(DiffEntry(imp_names[key], ADDED, "", imp_titles.get(title, title)))
+    return entries
 
 
 def _moved(

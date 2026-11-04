@@ -128,7 +128,7 @@ def _fields_of(sheet: RefinedSheet) -> list[_Field]:
         cell = sheet.tab.sections[section].rows[row_index][column_index]
         if cell.label and set(cell.label) <= ELLIPSIS_CHARS:
             continue
-        result.append(_Field(section, row, column, cell.label, norm(cell.label), cell.footnote, ""))
+        result.append(_Field(section, row, column, cell.label, norm(cell.label.rstrip('*').strip()), cell.footnote, ""))
     result.sort(key=lambda f: (f.row, f.column))
     return result
 
@@ -142,6 +142,18 @@ def _remarks_of(sheet: RefinedSheet) -> dict[int, _Remark]:
             parts.setdefault(int(match.group(1)), [n.strip() for n in match.group(2).split(",") if n.strip()])
         if parts:
             result[row] = _Remark(_coordinate(row, column), parts)
+    return result
+
+
+def _note_lines(sheet: RefinedSheet) -> dict[int, tuple[str, list[str]]]:
+    """Voetnootregels uit de notitiesectie onderaan: nummer -> (cel, objecttypen). / Footnote lines from the bottom
+    notes section: number -> (cell, object types)."""
+    result: dict[int, tuple[str, list[str]]] = {}
+    for row, column, text in sheet.note_cells:
+        match = FOOTNOTE_REMARK.search(text)
+        if match:
+            names = [n.strip() for n in match.group(2).split(",") if n.strip()]
+            result.setdefault(int(match.group(1)), (_coordinate(row, column), names))
     return result
 
 
@@ -216,6 +228,8 @@ def _analyse(
     object_sections = _object_sections(sheet)
     wanted: list[tuple[_Field, _Expected]] = []
     first_set: dict[int, tuple[frozenset[str] | None, str]] = {}
+    number_owner: dict[int, tuple[str, str]] = {}
+    noted: dict[int, tuple[str, list[str] | None]] = {}
     for item in fields:
         cell = _coordinate(item.row, item.column)
         claimed = _claimed(sheet, remarks, item, fields)
@@ -242,13 +256,23 @@ def _analyse(
             add(cell, WRONG_TYPES, "error", f"({number}) hoort bij {_fmt(claimed)} maar spec zegt "
                 f"{_fmt(expected.types)} / ({number}) is for {_fmt(claimed)} but spec says {_fmt(expected.types)}")
         key = _type_key(expected.types)
-        if number not in first_set:
+        if item.section in object_sections:
+            # Elk veld in 'Object informatie' heeft een eigen nummer, ook bij gelijke objecttypen.
+            # Every field in 'Object informatie' has its own number, even with the same object types.
+            if number not in number_owner:
+                number_owner[number] = (item.key, cell)
+            elif number_owner[number][0] != item.key:
+                add(cell, DUPLICATE_NUMBER, "error", f"({number}) staat ook bij {number_owner[number][1]} voor een "
+                    f"ander veld / ({number}) is also used at {number_owner[number][1]} for another field")
+        elif number not in first_set:
             first_set[number] = (key, cell)
         elif key != first_set[number][0] and key is not None and first_set[number][0] is not None:
             add(cell, DUPLICATE_NUMBER, "error", f"({number}) staat ook bij {first_set[number][1]} met andere "
                 f"objecttypen / ({number}) is also used at {first_set[number][1]} for other object types")
         remark = remarks.get(item.row)
         if sheet.margin_column is None:
+            reference = expected.types if expected.known else sheet.tab.footnotes.get(number)
+            noted.setdefault(number, (cell, reference))
             continue
         if remark is None or number not in remark.parts:
             add(cell, MARGIN_MISSING, "warning", f"opmerking voor ({number}) ontbreekt op rij {item.row} / "
@@ -272,6 +296,21 @@ def _analyse(
                     add(remark.cell, MARGIN_ORPHAN, "warning",
                         f"opmerking ({number}) staat naast geen veld met ({number}) / "
                         f"remark ({number}) has no field with ({number}) beside it")
+
+    if sheet.margin_column is None:
+        lines = _note_lines(sheet)
+        for number, (cell, reference) in noted.items():
+            if number not in lines:
+                add(cell, MARGIN_MISSING, "warning", f"notitieregel voor ({number}) ontbreekt onderaan / "
+                    f"note line for ({number}) is missing at the bottom")
+            elif reference and lines[number][1] != reference:
+                add(lines[number][0], MARGIN_MISMATCH, "warning",
+                    f"{_remark_text(number, lines[number][1])} wijkt af van {_remark_text(number, reference)} / "
+                    f"differs from the expected text")
+        for number, (cell, _names) in lines.items():
+            if number not in noted:
+                add(cell, MARGIN_ORPHAN, "warning", f"notitieregel ({number}) hoort bij geen veld met ({number}) / "
+                    f"note line ({number}) has no field with ({number})")
 
     numbers = sorted({i.number for i in fields if i.number is not None})
     if numbers and numbers != list(range(1, len(numbers) + 1)):
@@ -346,6 +385,40 @@ def _header_row(sheet: Worksheet, column: int) -> int:
     return 0
 
 
+def _fix_note_lines(ws: Worksheet, sheet: RefinedSheet, types_of: dict[int, list[str]], changes: list[str]) -> None:
+    """Herschrijf de voetnootregels onderaan (profiel zonder opmerkingenkolom) in de nieuwe nummering; andere
+    notities blijven staan. Extra regels komen onder aan het blad, overtollige cellen worden leeggemaakt.
+    Rewrite the footnote lines at the bottom (profile without remarks column) in the new numbering; other notes are
+    kept. Extra lines go at the bottom of the sheet, surplus cells are cleared."""
+    new_lines = [_remark_text(number, names) for number, names in sorted(types_of.items())]
+    cells = [(row, column) for row, column, _ in sheet.note_cells]
+    if not cells and not new_lines:
+        return
+    template = ws.cell(row=cells[-1][0], column=cells[-1][1]) if cells else None
+    span = next((r for r in ws.merged_cells.ranges if template is not None and template.coordinate in r), None)
+    for index, line in enumerate(new_lines):
+        if index < len(cells):
+            row, column = cells[index]
+        else:
+            row, column = ws.max_row + 1, 1
+            if span is not None:
+                ws.merge_cells(start_row=row, start_column=span.min_col, end_row=row, end_column=span.max_col)
+        target = ws.cell(row=row, column=column)
+        if isinstance(target, MergedCell):
+            continue
+        old = str(target.value) if target.value is not None else ""
+        if old != line:
+            target.value = line
+            if template is not None and index >= len(cells):
+                target.alignment = template.alignment.copy()
+            changes.append(f"Blad {ws.title} {_coordinate(row, column)}: '{old}' -> '{line}'")
+    for row, column in cells[len(new_lines):]:
+        target = ws.cell(row=row, column=column)
+        if not isinstance(target, MergedCell):
+            changes.append(f"Blad {ws.title} {_coordinate(row, column)}: '{target.value}' -> ''")
+            target.value = None
+
+
 def _fix_sheet(
     ws: Worksheet, sheet: RefinedSheet, engine: LayoutEngine | None, changes: list[str],
 ) -> dict[int, list[str]]:
@@ -384,6 +457,7 @@ def _fix_sheet(
 
     margin = sheet.margin_column
     if margin is None:
+        _fix_note_lines(ws, sheet, types_of, changes)
         return types_of
     for row in range(_header_row(ws, margin) + 1, ws.max_row + 1):
         cell = ws.cell(row=row, column=margin)
@@ -450,7 +524,7 @@ def fix_annotations(
             if sheet.name not in workbook.sheetnames:
                 continue
             metadata[sheet.meta_key or sheet.name] = _fix_sheet(workbook[sheet.name], sheet, use_engine, changes)
-            if sheet.margin_column is None:
+            if sheet.margin_column is None and not sheet.note_cells:
                 changes.append(f"Blad {sheet.name}: geen 'Opmerkingen'-kolom, opmerkingen niet bijgewerkt / "
                                f"no remarks column, remarks not updated")
         if refined.metadata is not None:

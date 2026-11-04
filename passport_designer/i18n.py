@@ -73,6 +73,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "mock.print": {"en": "Print", "nl": "Afdrukken"},
     "mock.more": {"en": "More", "nl": "Meer"},
     "mock.fullscreen": {"en": "Full screen", "nl": "Volledig scherm"},
+    # iAsset toont deze tekst Nederlands / iAsset shows this text in Dutch
+    "mock.search": {"en": "Zoeken op {label}", "nl": "Zoeken op {label}"},
+    "mock.no_data": {"en": "No Available Data", "nl": "Geen gegevens beschikbaar"},
+    "mock.pager": {"en": "0 to 0 of 0", "nl": "0 tot 0 van 0"},
     "mock.close": {"en": "Close", "nl": "Sluiten"},
     "status.ready": {"en": "Ready.", "nl": "Klaar."},
     "status.checking_ids": {"en": "Checking field IDs…", "nl": "Veld-ID's controleren…"},
@@ -243,6 +247,15 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     },
     "action.extra_tabs": {"en": "Show extra &mockup tabs", "nl": "Extra &mockup-tabbladen tonen"},
     "mock.activities": {"en": "Activities", "nl": "Activiteiten"},
+    "idcheck.choose.title": {"en": "Check field IDs", "nl": "Veld-ID's controleren"},
+    "idcheck.choose.text": {
+        "en": "A catalog is already loaded ({name}). Check against it, or compare with a separate catalog file "
+              "(e.g. the iAsset xlsx with subtheme names)?",
+        "nl": "Er is al een catalogus geladen ({name}). Controleren tegen die catalogus, of vergelijken met een "
+              "apart catalogusbestand (bijv. de iAsset-xlsx met subthemanamen)?",
+    },
+    "idcheck.choose.loaded": {"en": "Use loaded catalog", "nl": "Geladen catalogus gebruiken"},
+    "idcheck.choose.other": {"en": "Choose comparison catalog…", "nl": "Vergelijkingscatalogus kiezen…"},
     "dialog.load_ids_catalog": {
         "en": "Choose a field catalog or diverse-fields file",
         "nl": "Kies een veldencatalogus of diverse-fields-bestand",

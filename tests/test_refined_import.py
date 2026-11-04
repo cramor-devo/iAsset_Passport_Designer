@@ -181,8 +181,8 @@ def test_sheet_without_margin_column_and_odd_rows(tmp_path, exported, wave1_spec
     refined = read_refined(path, wave1_spec)
     bord = refined.sheets[0]
     assert bord.margin_column is None and any("Opmerkingen" in w for w in bord.warnings)
-    assert [c.label for c in bord.tab.sections[0].rows[0]] == ["Nummer", "IMBOR Filter", "Thema", "Subthema"]
-    assert bord.tab.sections[-1].rows[-1][0].label == "extra"
+    assert [c.label for c in bord.tab.sections[0].rows[0]] == ["Nummer", "IMBOR Filter*", "Thema", "Subthema"]
+    assert bord.tab.sections[-1].rows[-1][0].label == "extra*"
 
 
 def _combi(tmp_path, wave1_spec) -> Path:
@@ -253,3 +253,46 @@ def test_designs_named_like_reference_or_metadata_sheets_survive(tmp_path, wave1
     refined = read_refined(path, wave1_spec)
     assert [s.name for s in refined.sheets] == ["Bron Objecttypen", "_designer"]
     assert not refined.warnings
+
+
+def _cell_values(sheet) -> list[list[tuple[str, int | None, str]]]:
+    return [[(c.label, c.footnote, c.annotation) for c in r] for s in sheet.sections for r in s.rows]
+
+
+def _payload_view(tab, spec):
+    from passport_designer.payload import build_tab_payload
+
+    result = build_tab_payload(tab)
+    return result.body, [(i.code, i.message) for i in result.issues]
+
+
+def test_legacy_import_keeps_annotation_separate_from_label(tmp_path, wave1_spec):
+    from passport_designer.payload import build_tab_payload
+
+    engine = LayoutEngine(wave1_spec, LayoutOptions(profile=LEGACY))
+    tab = engine.build_all()[0]
+    path = export_workbook([tab], tmp_path / "legacy.xlsx", spec=wave1_spec)
+    imported = read_refined(path, wave1_spec).sheets[0].tab
+    owner = next(c for s in tab.sections for r in s.rows for c in r if c.annotation)
+    cells = {(c.label, c.annotation) for s in imported.sections for r in s.rows for c in r}
+    assert (owner.label, owner.annotation) in cells
+    assert _cell_values(imported) == _cell_values(tab)
+    assert build_tab_payload(imported).body == build_tab_payload(tab).body
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_asterisk_survives_import_and_re_export(tmp_path, wave1_spec, legacy):
+    engine = LayoutEngine(wave1_spec, LayoutOptions(profile=LEGACY) if legacy else LayoutOptions())
+    tab = engine.build_all()[0]
+    first = export_workbook([tab], tmp_path / "a.xlsx", spec=wave1_spec)
+    imported = read_refined(first, wave1_spec).sheets[0].tab
+    assert legacy or any(c.label == "IMBOR Filter*" for s in imported.sections for r in s.rows for c in r)
+    second = export_workbook([imported], tmp_path / "b.xlsx", spec=wave1_spec)
+
+    def values(path):
+        sheet = load_workbook(path)["Bord"]
+        return [[c.value for c in row] for row in sheet.iter_rows()]
+
+    assert values(second) == values(first)
+    before, after = _payload_view(tab, wave1_spec), _payload_view(imported, wave1_spec)
+    assert before == after and (legacy or any(code == "open-design-questions" for code, _ in after[1]))

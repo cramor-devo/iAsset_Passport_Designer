@@ -99,7 +99,9 @@ Het logbestand staat in `%LOCALAPPDATA%\iAssetPassportDesigner\passport_designer
    programma roept iAsset nooit aan. Laad eerst een opgeslagen V2 `GET /diverse-fields`-JSON of het
    veldencatalogus-xlsx uit de iAsset-GUI. Het venster toont per veld of het ID gevonden of ontbreekt, of label of
    veldtype afwijkt en of het veld is ingeschakeld voor het subthema van elk objecttype (op naam gekoppeld; dat vraagt
-   het catalogus-xlsx, een JSON bevat alleen subthema-ID's). Met **Exporteren…** sla je het rapport op als xlsx.
+   het catalogus-xlsx, een JSON bevat alleen subthema-ID's). Is er al een catalogus geladen, kies dan **Geladen
+   catalogus gebruiken** of **Vergelijkingscatalogus kiezen…** (een apart bestand, bijv. het xlsx naast een geladen
+   JSON, zodat veldtypeverschillen en subthemanamen worden gecontroleerd). Met **Exporteren…** sla je het rapport op als xlsx.
 9. **Bestand → Bijgewerkt Excel-ontwerp importeren…** leest een handmatig verfijnd ontwerp in (bij voorkeur een
    export van dit programma) en toont het als huidig ontwerp. De tabbladen verschijnen in iAsset-stijl, met
    kolombreedtes uit Excel. Het tabblad **Vergelijking** zet de import naast een vers uit de geladen specificatie

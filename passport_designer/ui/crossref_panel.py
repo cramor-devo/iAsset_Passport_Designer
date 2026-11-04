@@ -87,7 +87,7 @@ class CrossRefPanel(QWidget):
             move = f"{entry.from_section or '–'} → {entry.to_section or '–'}"
             child = QTreeWidgetItem([tr(f"kind.{entry.kind}"), label, move, entry.detail])
             child.setBackground(0, QBrush(QColor(KIND_COLOURS.get(entry.kind, "#8a8a8e"))))
-            child.setForeground(0, QBrush(QColor("#ffffff")))
+            child.setForeground(0, QBrush(QColor("#000000")))
             child.setTextAlignment(0, Qt.AlignmentFlag.AlignCenter)
             top.addChild(child)
         for section in diff.added_sections:

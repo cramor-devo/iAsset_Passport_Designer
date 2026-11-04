@@ -12,8 +12,9 @@ from openpyxl import load_workbook
 
 from passport_designer.annotations import check_annotations, fix_annotations
 from passport_designer.excel_export import export_workbook
-from passport_designer.layout_engine import LayoutEngine
+from passport_designer.layout_engine import LayoutEngine, LayoutOptions
 from passport_designer.models import ObjectType, SpecModel
+from passport_designer.profiles import LEGACY
 from passport_designer.refined_import import read_refined
 
 COMMON = ["breedte", "hoogte"]
@@ -281,3 +282,61 @@ def test_fix_warns_about_drawings_and_still_writes(design, spec):
 
 def _clean(design: Path, spec: SpecModel) -> Path:
     return export_workbook(LayoutEngine(spec).build_all(), design.with_name("clean.xlsx"), spec=spec)
+
+
+def _legacy_design(tmp_path: Path, spec: SpecModel) -> Path:
+    engine = LayoutEngine(spec, LayoutOptions(profile=LEGACY))
+    return export_workbook(engine.build_all(), tmp_path / "legacy.xlsx", spec=spec)
+
+
+def _note_values(path: Path) -> list[str]:
+    sheet = load_workbook(path)["Bord"]
+    return [str(c.value) for row in sheet.iter_rows() for c in row if c.value and "Objecttype:" in str(c.value)]
+
+
+def test_same_number_for_two_object_fields_is_duplicate(tmp_path):
+    spec = SpecModel()
+    spec.object_types = [ObjectType(n, "Bord", "Borden") for n in ("A", "B")]
+    spec.attributes = {"A": [*COMMON, "alfa", "beta"], "B": COMMON}
+    design = export_workbook(LayoutEngine(spec).build_all(), tmp_path / "same.xlsx", spec=spec)
+
+    def reuse(sheet):
+        for label, number in (("alfa", 1), ("beta", 1)):
+            cell = _find_in(sheet, label)
+            cell.value = f"{label} ({number})"
+
+    report = check_annotations(_edit(design, reuse), spec)
+    assert any(i.kind == "duplicate-number" and "(1)" in i.detail for i in report.issues)
+    fixed = fix_annotations(design, spec)
+    assert fixed.report_after.ok
+    assert len(set(_numbers_in_reading_order(fixed.out_path))) == len(_numbers_in_reading_order(fixed.out_path))
+
+
+def _find_in(sheet, text):
+    for row in sheet.iter_rows():
+        for cell in row:
+            if isinstance(cell.value, str) and cell.value.startswith(text):
+                return cell
+    raise AssertionError(text)
+
+
+def test_legacy_note_lines_follow_renumbering(tmp_path, spec):
+    path = _legacy_design(tmp_path, spec)
+    assert check_annotations(path, spec).ok
+    before = _note_values(path)
+    assert before
+
+    def renumber(sheet):
+        cell = _find_in(sheet, "alfa")
+        cell.value = "alfa (7)"
+        sheet.cell(row=sheet.max_row + 1, column=1, value="Eigen notitie")
+
+    _edit(path, renumber)
+    kinds = {i.kind for i in check_annotations(path, spec).issues}
+    assert {"margin-missing", "margin-orphan"} <= kinds
+    result = fix_annotations(path, spec)
+    assert result.report_after.ok
+    notes = _note_values(result.out_path)
+    assert not any(n.startswith("(7)") for n in notes) and notes[0].startswith("(1) Objecttype:")
+    values = [c.value for row in load_workbook(result.out_path)["Bord"].iter_rows() for c in row if c.value]
+    assert "Eigen notitie" in values

@@ -335,9 +335,46 @@ def test_check_field_ids_uses_loaded_catalog_or_asks(window, tmp_path, monkeypat
     wait_for_jobs()
     assert window.ids is not None and window.ids.catalog is not None
     assert "1 field IDs loaded" in window.statusBar().currentMessage()
+    monkeypatch.setattr(window, "_choose_catalog_source", lambda _catalog: "loaded")
     window.check_field_ids()  # nu direct met de geladen catalogus / now directly with the loaded catalog
     wait_for_jobs()
     assert len(shown) == 2
+
+
+def test_check_field_ids_can_use_separate_comparison_catalog(window, tmp_path, monkeypatch):
+    from PyQt6.QtWidgets import QFileDialog
+
+    from passport_designer.field_catalog import FieldCatalog, FieldInfo
+
+    shown: list[object] = []
+    seen: list[FieldCatalog] = []
+    monkeypatch.setattr(window, "_exec_dialog", lambda dialog: shown.append(dialog) or 0)
+    real_check = window.show_id_check
+    monkeypatch.setattr(window, "show_id_check", lambda catalog: seen.append(catalog) or real_check(catalog))
+    source = tmp_path / "diverse.json"
+    source.write_text('[{"id": 7, "label": "bordcode", "type": "select", "themes": []}]', encoding="utf-8")
+    window.load_ids_file(str(source))
+    wait_for_jobs()
+    loaded = window.ids.catalog
+    assert loaded is not None
+    loaded.subtheme_names = {1: "Bord"}
+    other = FieldCatalog(source="gui.xlsx")
+    other.entries = {7: FieldInfo(7, "bordcode", "cijferveld", "numeric")}
+    monkeypatch.setattr("passport_designer.ui.main_window.load_catalog", lambda _p: other)
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *_a, **_k: (str(source), ""))
+
+    monkeypatch.setattr(window, "_choose_catalog_source", lambda _catalog: "")
+    window.check_field_ids()  # annuleren / cancel
+    wait_for_jobs()
+    assert not seen
+
+    monkeypatch.setattr(window, "_choose_catalog_source", lambda _catalog: "other")
+    window.check_field_ids()
+    wait_for_jobs()
+    assert len(seen) == 1 and seen[0] is not loaded and seen[0].entries is other.entries
+    assert seen[0].subtheme_names == {1: "Bord"} and other.subtheme_names == {}  # namen samengevoegd / names merged
+    assert window.ids.catalog is loaded  # de ID-map blijft behouden / the ID map is retained
+    assert len(shown) == 1
 
 
 def test_annotation_dialog_with_report_and_fix(window, exported_file, monkeypatch):

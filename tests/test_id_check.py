@@ -113,3 +113,15 @@ def test_summary_and_export(tmp_path: Path):
     assert [c.value for c in ws[1]][:5] == ["Tab", "Section", "Label", "Field ID", "Status"]
     assert ws.max_row == len(findings) + 1 and ws.auto_filter.ref and ws.freeze_panes == "A2"
     assert {str(ws.cell(r, 5).value) for r in range(2, ws.max_row + 1)} >= {"ok", "missing-id"}
+
+
+def test_id_map_resolves_duplicate_catalog_label():
+    ids = FieldIdMap()
+    ids.add("Dup", 1010)
+    findings = check_ids([make_tab("Dup")], make_catalog(), ids)
+    assert not by_status(findings, "ambiguous")
+    # het gekozen ID wordt wel gevalideerd (subthema) / the chosen ID is still validated (subtheme)
+    assert {(f.field_id, f.status) for f in findings if f.label == "Dup"} == {(1010, "subtheme-disabled")}
+    ids = FieldIdMap()
+    ids.add("Dup", 4242)
+    assert by_status(check_ids([make_tab("Dup")], make_catalog(), ids), "unknown-id")

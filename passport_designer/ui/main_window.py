@@ -3,6 +3,7 @@ Main window: load specifications, pick a design, view the mockup and export API 
 
 from __future__ import annotations
 
+import copy
 import logging
 import re
 from collections.abc import Callable
@@ -73,6 +74,7 @@ from .workers import Job, run_job
 
 log = logging.getLogger(__name__)
 
+CATALOG_LOADED, CATALOG_OTHER = "loaded", "other"
 FORMATS = ("payload.fmt_json", "payload.fmt_compact", "payload.fmt_form")
 SEVERITY_MARK = {Severity.INFO: "ℹ", Severity.WARNING: "⚠", Severity.ERROR: "⛔"}
 UNSAFE_FILENAME = re.compile(r'[<>:"/\\|?*\s]+')
@@ -552,8 +554,32 @@ class MainWindow(QMainWindow):
         if not self._require_tabs():
             return
         if self.ids is not None and self.ids.catalog is not None:
-            self.show_id_check(self.ids.catalog)
+            choice = self._choose_catalog_source(self.ids.catalog)
+            if choice == CATALOG_LOADED:
+                self.show_id_check(self.ids.catalog)
+            elif choice == CATALOG_OTHER:
+                self._pick_comparison_catalog()
             return
+        self._pick_comparison_catalog()
+
+    def _choose_catalog_source(self, loaded: FieldCatalog) -> str:
+        """Vraag of de geladen catalogus (tegen zichzelf) of een apart vergelijkingsbestand gebruikt wordt; geeft
+        ``CATALOG_LOADED``, ``CATALOG_OTHER`` of '' (annuleren). Tests vervangen deze methode.
+        Ask whether to use the loaded catalog (against itself) or a separate comparison file; returns
+        ``CATALOG_LOADED``, ``CATALOG_OTHER`` or '' (cancel). Tests replace this method."""
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle(tr("idcheck.choose.title"))
+        box.setText(tr("idcheck.choose.text", name=loaded.source or "?"))
+        use_loaded = box.addButton(tr("idcheck.choose.loaded"), QMessageBox.ButtonRole.AcceptRole)
+        other = box.addButton(tr("idcheck.choose.other"), QMessageBox.ButtonRole.ActionRole)
+        box.addButton(QMessageBox.StandardButton.Cancel)
+        box.setDefaultButton(use_loaded)
+        self._exec_dialog(box)
+        clicked = box.clickedButton()
+        return CATALOG_LOADED if clicked is use_loaded else CATALOG_OTHER if clicked is other else ""
+
+    def _pick_comparison_catalog(self) -> None:
         start = self.settings.string("paths/last", str(Path.home()))
         file, _ = QFileDialog.getOpenFileName(self, tr("dialog.load_ids_catalog"), start, tr("dialog.filter_catalog"))
         if file:
@@ -579,7 +605,20 @@ class MainWindow(QMainWindow):
         self._busy = False
         self.statusBar().showMessage(tr("status.ready"))
         if isinstance(catalog, FieldCatalog):
-            self.show_id_check(catalog)
+            loaded = self.ids.catalog if self.ids is not None else None
+            self.show_id_check(self._with_subtheme_names(catalog, loaded))
+
+    @staticmethod
+    def _with_subtheme_names(catalog: FieldCatalog, loaded: FieldCatalog | None) -> FieldCatalog:
+        """Vul ontbrekende subthemanamen aan uit de geladen catalogus (een JSON kent alleen subthema-id's); de
+        originelen blijven ongewijzigd. Fill missing subtheme names from the loaded catalog (JSON only has subtheme
+        IDs); the originals stay unchanged."""
+        if loaded is None or catalog.has_subtheme_names or not loaded.has_subtheme_names:
+            return catalog
+        merged = copy.copy(catalog)
+        merged.subtheme_names = dict(loaded.subtheme_names)
+        merged.invalidate()
+        return merged
 
     def _on_catalog_failed(self, error: object) -> None:
         self._busy = False

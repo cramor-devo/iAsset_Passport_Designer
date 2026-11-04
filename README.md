@@ -94,7 +94,9 @@ The log file is stored at `%LOCALAPPDATA%\iAssetPassportDesigner\passport_design
    never calls iAsset. Load a saved V2 `GET /diverse-fields` JSON or the iAsset GUI field catalog xlsx first. The
    dialog shows per field whether the ID is found or missing, whether label or field type differ, and whether the
    field is enabled for the sub-theme of each object type (matched by name; this needs the catalog xlsx, a JSON only
-   has sub-theme IDs). **Export…** saves the report as xlsx.
+   has sub-theme IDs). With a catalog already loaded you can choose **Use loaded catalog** or **Choose comparison
+   catalog…** (a separate file, e.g. the xlsx next to a loaded JSON, so field-type differences and sub-theme names are
+   checked). **Export…** saves the report as xlsx.
 9. **File → Import refined Excel…** reads a manually refined design (preferably one exported by this tool) and shows
    it as the current design. The sheets are shown in iAsset style, with column widths taken from Excel. The
    **Cross-reference** tab compares the import with a design freshly generated from the loaded specification: added,

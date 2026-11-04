@@ -7,7 +7,9 @@
   changes* outlines them in the mockup (off by default, so screenshots stay clean). *Back to generated design* returns
   to the generated design (#10).
 - The mockup is restyled after iAsset for all designs: view dropdown, tab bar, section titles, dark header band with
-  centred labels and rounded value boxes (#10).
+  centred labels and rounded value boxes (#10). Fields are centred: labels in the band and each value box under its
+  label; repeatable sections (e.g. *Actoren en rollen*) show one header band with three sample rows, and *Memo* shows
+  as a linked-object table with search boxes and pager.
 - *Check/fix annotations…*: checks the `(n)` markers and `Opmerkingen` rows of a refined Excel file against the spec and
   writes a repaired `<name>_fixed.xlsx` (own number per field in reading order, layout and styling untouched, original
   file unchanged). Only Object informatie markers are checked; a warning appears when the sheet contains drawings (#11).
@@ -16,7 +18,8 @@
   files, filter column, tab → object types) that the import uses when present (#12).
 - *Check field IDs…*: offline check of the passport fields against a saved V2 `GET /diverse-fields` JSON or the iAsset
   GUI field catalog xlsx: ID found or missing, label and field-type mismatch, and enabled per subthema. Shown in a
-  dialog and exportable to xlsx. The app never calls iAsset (#13).
+  dialog and exportable to xlsx. With a catalog loaded you can pick a separate comparison catalog. The app never calls
+  iAsset (#13).
 - *Load field ID file…* also accepts the iAsset GUI field catalog xlsx (`Paspoort velden` plus `Thema Subthema`) (#14).
 - *Merge selected passports…* (Ctrl+M): merge the selected passports regardless of filter, group or advisor threshold,
   with a name dialog and a confirmation when group or filter differ. Joins Undo/Reset, export and payload; disabled while

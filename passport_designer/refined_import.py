@@ -15,7 +15,7 @@ from openpyxl import load_workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
 from .compare import ELLIPSIS_CHARS
-from .design_rules import SECTION_NOTES
+from .design_rules import SECTION_BASIS, SECTION_NOTES
 from .excel_export import GREY, METADATA_SHEET, PURPLE, REFERENCE_SHEETS, find_metadata_sheet
 from .layout_engine import semantic_style
 from .models import Cell, ObjectType, PassportTab, Section, SectionStyle, SpecModel, norm
@@ -24,7 +24,9 @@ from .profiles import LEGACY, PROFILES, ROTTERDAM_V3, DesignProfile
 OBJECT_TYPES_LINE = "objecttypes:"
 MARGIN_HEADER = "opmerkingen"
 FOOTNOTE_REMARK = re.compile(r"\((\d+)\)\s*Objecttype:\s*([^;]*)", re.IGNORECASE)
+FOOTNOTE_NOTE = re.compile(r"^\(\d+\)\s*Objecttype:", re.IGNORECASE)
 NOTE_LINE = re.compile(r"^(\(\d+\)\s*Objecttype|\*+\s+\S)", re.IGNORECASE)
+ANNOTATION = re.compile(r"^(.*?)\s*\(([^()\d][^()]*)\)$")
 TRAILING_FOOTNOTE = re.compile(r"\s*\((\d+)\)\s*$")
 MERGED_NOTE = re.compile(r"^Samengevoegd uit filters:\s*(.*)$", re.IGNORECASE)
 HEADING_SCAN_ROWS = 6
@@ -54,6 +56,9 @@ class RefinedSheet:
     column_widths: list[float] = field(default_factory=list)
     margin_column: int | None = None
     margin_width: float | None = None
+    # Voetnootregels in de notitiesectie onderaan (rij, kolom, tekst); alleen profielen zonder opmerkingenkolom.
+    # Footnote lines in the bottom notes section (row, column, text); only profiles without a remarks column.
+    note_cells: list[tuple[int, int, str]] = field(default_factory=list)
     meta_key: str | None = None  # sleutel in metadata['sheets'] (kan afwijken van de bladnaam) / key in metadata
     metadata: dict[str, Any] | None = None  # blokje van dit blad uit '_designer' / this sheet's '_designer' entry
     warnings: list[str] = field(default_factory=list)
@@ -84,6 +89,32 @@ def split_label(value: object) -> tuple[str, int | None]:
         if stripped == text:
             return text, footnote
         text = stripped
+
+
+def split_cell(value: object, profile: DesignProfile | None = None, section: str = "") -> tuple[str, str, int | None]:
+    """Celtekst als (veldnaam, annotatie, voetnootnummer). De naam houdt de sterretjes (open vraag); een
+    profielannotatie ('Beheergroep (Borden)' in de basissectie) wordt apart teruggegeven.
+    Cell text as (field name, annotation, footnote number). The name keeps its asterisks (open question); a
+    profile annotation ('Beheergroep (Borden)' in the basis section) is returned separately."""
+    text = " ".join(str(value).split())
+    label, footnote = split_label(text)
+    stars = max((len(part) - len(part.rstrip("*")) for part in _star_parts(text)), default=0)
+    annotation = ""
+    if profile is not None and profile.basis_group_annotation and footnote is None and not stars:
+        match = ANNOTATION.match(label)
+        if match and norm(section) == norm(SECTION_BASIS) and norm(match.group(1)).startswith("beheergroep"):
+            label, annotation = match.group(1), match.group(2).strip()
+    return label + "*" * stars, annotation, footnote
+
+
+def _star_parts(text: str) -> list[str]:
+    """Tekstdelen waarin achterliggende sterretjes staan: vóór en na het voetnootnummer. / Text parts holding
+    trailing asterisks: before and after the footnote number."""
+    parts = [text.strip()]
+    match = TRAILING_FOOTNOTE.search(parts[0].rstrip("* ").strip())
+    if match:
+        parts.append(parts[0].rstrip("* ").strip()[: match.start()].strip())
+    return parts
 
 
 def read_metadata(path: str | Path) -> dict[str, Any] | None:
@@ -284,8 +315,10 @@ def _read_sheet(
         if remark:
             _add_footnotes(remark, tab.footnotes)
         if notes_mode or section is None:
-            for _, text in cells:
+            for column, text in cells:
                 _note(tab, text)
+                if notes_mode and FOOTNOTE_NOTE.match(text):
+                    result.note_cells.append((row, column, text))
             continue
         fields: list[tuple[int, str]] = []
         for column, text in cells:
@@ -303,12 +336,12 @@ def _read_sheet(
         section_index = len(tab.sections) - 1
         row_cells: list[Cell] = []
         for column, text in fields:
-            label, footnote = split_label(text)
-            if not label:
+            label, annotation, footnote = split_cell(text, profile, section.title)
+            if not label.strip("*"):
                 continue
-            row_cells.append(Cell(label, footnote))
+            row_cells.append(Cell(label, footnote, annotation=annotation))
             result.positions[(section_index, row_index, len(row_cells) - 1)] = (row, column)
-            result.label_positions.setdefault(norm(label), (row, column))
+            result.label_positions.setdefault(norm(label.rstrip("*").strip()), (row, column))
             used_columns = max(used_columns, column)
         section.rows.append(row_cells)
         if remark:

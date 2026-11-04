@@ -95,7 +95,9 @@ def check_ids(tabs: list[PassportTab], catalog: FieldCatalog, id_map: FieldIdMap
         for section, label in _fields(tab).values():
             found = _check_field(tab, section, label, catalog, id_map, other)
             if not found:
-                ok_id = id_map.lookup(label) if id_map is not None else catalog.by_label(label)[0].id
+                ok_id = id_map.lookup(label) if id_map is not None else None
+                if ok_id is None:
+                    ok_id = catalog.by_label(label)[0].id
                 found = [IdFinding(tab.name, section, label, ok_id, OK, "info")]
             findings.extend(found)
         if catalog.has_subtheme_names:
@@ -115,10 +117,14 @@ def _check_field(
     other: FieldCatalog | None,
 ) -> list[IdFinding]:
     matches = catalog.by_label(label)
-    ambiguous = len(matches) > 1 or (id_map is not None and id_map.is_ambiguous(label))
-    if id_map is not None:
-        field_id = id_map.lookup(label)
+    field_id = id_map.lookup(label) if id_map is not None else None
+    if id_map is not None and field_id is not None:
+        # De ID-map beslist; alleen een dubbel label in de map zelf is dubbelzinnig. Het gekozen ID wordt hieronder
+        # gecontroleerd (bestaan, type, subthema). / The ID map decides; only a duplicate in the map itself is
+        # ambiguous. The chosen ID is validated below (existence, type, subtheme).
+        ambiguous = id_map.is_ambiguous(label)
     else:
+        ambiguous = len(matches) > 1
         field_id = matches[0].id if len(matches) == 1 else None
     if ambiguous:
         ids = sorted({m.id for m in matches}) or ([field_id] if field_id is not None else [])
