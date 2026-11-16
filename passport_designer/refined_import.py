@@ -71,7 +71,8 @@ class RefinedSheet:
     # and user-deleted fields from '_designer'.
     verify: set[str] = field(default_factory=set)
     deleted: list[str] = field(default_factory=list)
-
+    # Door de gebruiker gemaakte indeling uit '_designer' (JSON-vorm van TabOverride) / user layout from '_designer'
+    layout: dict[str, Any] | None = None
 
 @dataclass
 class RefinedWorkbook:
@@ -463,6 +464,8 @@ def _finish(result: RefinedSheet, sheet: Worksheet, used_columns: int, margin: i
     sheet_meta = result.metadata or {}
     result.verify |= {norm(str(v)) for v in sheet_meta.get("verify", [])}
     result.deleted = [str(v) for v in sheet_meta.get("deleted", [])]
+    raw_layout = sheet_meta.get("layout")
+    result.layout = raw_layout if isinstance(raw_layout, dict) else None
     for number, names in sheet_meta.get("footnotes", {}).items():
         tab.footnotes.setdefault(number, list(names))
     tab.footnotes = dict(sorted(tab.footnotes.items()))

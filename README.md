@@ -135,6 +135,16 @@ The log file is stored at `%LOCALAPPDATA%\iAssetPassportDesigner\passport_design
     `Opmerkingen` text beside the right rows. Layout and styling stay untouched and the original file is not changed.
     The tool warns if the sheet contains drawings.
 
+### Reordering fields
+
+In the **Design sheet** tab you can drag a field to another place: in the same row, in another row or in another
+section. Dropping on a section heading appends the field to that section; dropping on an empty row fills it. Right-click for
+**Insert empty row above/below**, **New section below…**, **Rename section…**, **Delete empty row** and **Reset order of
+this passport**. A row holds at most 5 fields, and repeatable sections and Notes can only be moved as a whole. The Design
+sheet is leading: the mockup, the PNG, the Excel exports and the payload follow your order. Undo/Redo: Ctrl+Z / Ctrl+Y.
+The layout (with marks and deletions) is saved per passport and specification; **File → Save layout… / Load layout…**
+share it as a JSON file. Dragging is unavailable while one object type is selected.
+
 ### Recommended workflow
 
 1. Export the Excel design (**File → Export Excel design…**) and refine it in Excel.
@@ -157,7 +167,7 @@ The log file is stored at `%LOCALAPPDATA%\iAssetPassportDesigner\passport_design
 | Only fields with Opnemen = "Ja" (View menu) | Ctrl+Alt+O |
 | Highlight minimal dataset (View menu) | Ctrl+Shift+M |
 | Mark: verify with customer (Edit menu) | Ctrl+Shift+V |
-| Delete field / Undo field change (Edit menu) | Del / Ctrl+Z |
+| Delete field / Undo / Redo field change (Edit menu) | Del / Ctrl+Z / Ctrl+Y |
 
 ## Design profiles
 

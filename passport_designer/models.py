@@ -210,6 +210,8 @@ class Section:
     rows: list[Row] = field(default_factory=list)
     repeater: bool = False  # herhaalbare voorbeeldrijen (Actoren, Memo) / repeatable sample rows
     margin: dict[int, str] = field(default_factory=dict)
+    # Door de gebruiker toegevoegde sectie (Ontwerpblad, slepen en neerzetten) / section added by the user
+    added: bool = False
 
 
 @dataclass

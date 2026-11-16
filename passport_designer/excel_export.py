@@ -21,6 +21,7 @@ from . import __version__
 from .dataset_flags import MDS_COMMON, MinimalMark, excluded_labels
 from .i18n import tr
 from .layout_engine import LayoutEngine, notes_section
+from .layout_overrides import CellRef
 from .merge_advisor import MergeSuggestion, field_matrix
 from .models import PassportTab, RawSheet, Section, SectionStyle, SpecModel, norm
 
@@ -82,6 +83,7 @@ class SheetCell:
     fill_stops: tuple[str, ...] = ()  # strepen (minimale dataset) / stripes (minimal dataset)
     tip: str = ""  # tooltip in het voorbeeld / tooltip in the preview
     key: str = ""  # genormaliseerde veldnaam van een veldcel / normalised field name of a field cell
+    ref: CellRef | None = None  # plek in het paspoort (slepen) / position in the passport (drag and drop)
 
 
 @dataclass
@@ -90,6 +92,8 @@ class SheetLayout:
 
     cells: list[SheetCell] = field(default_factory=list)
     widths: dict[int, int] = field(default_factory=dict)
+    # Blad-rij (1-gebaseerd) -> (sectie, rij); rij -1 = sectiekop / sheet row (1-based) -> (section, row); -1 = heading
+    row_refs: dict[int, tuple[int, int]] = field(default_factory=dict)
 
     @property
     def row_count(self) -> int:
@@ -149,11 +153,17 @@ def sheet_layout(
         if index:
             row += 1  # witregel tussen secties / blank line between sections
         _heading(cells, row, section, tab)
+        in_tab = index < len(tab.sections)  # de notitiesectie hoort er niet bij / the notes section is not part of it
+        if in_tab:
+            layout.row_refs[row] = (index, -1)
         if profile.margin_notes and index == 0:
             cells.append(SheetCell(row, margin_column, "Opmerkingen"))
         row += 1
         for row_index, row_cells in enumerate(section.rows):
             is_notes = section.style is SectionStyle.NOTES
+            movable = in_tab and not (section.repeater or is_notes)
+            if in_tab:
+                layout.row_refs[row] = (index, row_index)
             for column, cell in enumerate(row_cells, start=1):
                 bold = profile.bold_fields and not is_notes
                 merge_to = columns if is_notes and column == 1 and columns > 1 else 0
@@ -166,6 +176,7 @@ def sheet_layout(
                     SheetCell(
                         row, column, cell.display, bold=bold, italic=is_muted, colour=colour,
                         wrap=True, merge_to=merge_to, key="" if is_notes else key,
+                        ref=CellRef(index, row_index, column - 1) if movable else None,
                         fill=mark.colours[0] if mark and len(mark.colours) == 1 else "",
                         fill_stops=mark.colours if mark and len(mark.colours) > 1 else (),
                         tip="\n".join(
@@ -314,6 +325,7 @@ def write_metadata(
     workbook: Workbook, tabs: list[PassportTab], titles: list[str], spec: SpecModel | None, used: set[str],
     reference_sheets: list[str] | None = None, *, only_included: bool = True, minimal_shown: bool = False,
     verify: dict[str, set[str]] | None = None, deleted: dict[str, set[str]] | None = None,
+    layouts: dict[str, dict[str, object]] | None = None,
 ) -> None:
     """Verborgen blad '_designer' met sleutel/waarde-regels (versie, profiel, bronnen, filterkolom en per ontwerpblad
     de objecttypen, samenvoeging en voetnoten als JSON). Hidden '_designer' sheet with key/value rows (version,
@@ -343,6 +355,8 @@ def write_metadata(
             info["verify"] = sorted(verify[title])
         if deleted and deleted.get(title):
             info["deleted"] = sorted(deleted[title])
+        if layouts and layouts.get(title):
+            info["layout"] = layouts[title]
         sheet.append([f"sheet:{title}", json.dumps(info, ensure_ascii=False)])
     sheet.column_dimensions["A"].width = 28
     sheet.column_dimensions["B"].width = 100
@@ -354,6 +368,7 @@ def export_workbook(
     *, only_included: bool = True,
     minimal_by_tab: dict[str, tuple[dict[str, MinimalMark], dict[str, str]]] | None = None,
     verify_by_tab: dict[str, set[str]] | None = None, deleted_by_tab: dict[str, set[str]] | None = None,
+    layout_by_tab: dict[str, dict[str, object]] | None = None,
 ) -> Path:
     """Schrijf alle ontwerpen naar één xlsx-bestand; ``sheet_names`` vervangt desgewenst de tabbladnamen (bijv. per
     objecttype). Met ``spec`` komen er bronbladen bij ('Bron Objecttypen', 'Bron Attributen'); altijd komt er een
@@ -378,6 +393,7 @@ def export_workbook(
     titles: list[str] = []
     by_title_verify: dict[str, set[str]] = {}
     by_title_deleted: dict[str, set[str]] = {}
+    by_title_layout: dict[str, dict[str, object]] = {}
     for tab, name in zip(tabs, names, strict=True):
         sheet = workbook.create_sheet(sheet_title(name, used))
         titles.append(sheet.title)
@@ -387,11 +403,13 @@ def export_workbook(
         write_tab(sheet, tab, muted=muted, minimal=marks, legend=legend, verify=verify)
         by_title_verify[sheet.title] = verify
         by_title_deleted[sheet.title] = (deleted_by_tab or {}).get(name, set())
+        if layout_by_tab and layout_by_tab.get(name):
+            by_title_layout[sheet.title] = layout_by_tab[name]
     if spec is not None:
         references = add_reference_sheets(workbook, spec, tabs, used)
     write_metadata(
         workbook, tabs, titles, spec, used, references, only_included=only_included,
-        minimal_shown=bool(minimal_by_tab), verify=by_title_verify, deleted=by_title_deleted,
+        minimal_shown=bool(minimal_by_tab), verify=by_title_verify, deleted=by_title_deleted, layouts=by_title_layout,
     )
     target = Path(path)
     workbook.save(target)

@@ -143,6 +143,17 @@ Het logbestand staat in `%LOCALAPPDATA%\iAssetPassportDesigner\passport_designer
     regels. Opmaak en layout blijven ongewijzigd en het originele bestand verandert niet. Bevat het blad tekeningen,
     dan waarschuwt het programma.
 
+### Velden herschikken
+
+In het tabblad **Ontwerpblad** sleep je een veld naar een andere plek: in dezelfde rij, een andere rij of een andere
+sectie. Neerzetten op een sectiekop voegt het veld achteraan die sectie toe; neerzetten op een lege rij vult die. Klik
+met rechts voor **Lege rij erboven/eronder invoegen**, **Nieuwe sectie eronder…**, **Sectie hernoemen…**, **Lege rij
+verwijderen** en **Volgorde van dit paspoort herstellen**. Een rij bevat maximaal 5 velden; herhaalbare secties en
+Notes verplaats je alleen als geheel. Het ontwerpblad is leidend: de mockup, de PNG, de Excel-exports en de payload
+volgen jouw volgorde. Ongedaan maken/opnieuw: Ctrl+Z / Ctrl+Y. De indeling (met markeringen en verwijderingen) wordt
+per paspoort en specificatie bewaard; **Bestand → Indeling opslaan… / Indeling laden…** deelt die als JSON-bestand.
+Slepen kan niet zolang één objecttype is gekozen.
+
 ### Aanbevolen werkwijze
 
 1. Exporteer het Excel-ontwerp (**Bestand → Excel-ontwerp exporteren…**) en werk het uit in Excel.

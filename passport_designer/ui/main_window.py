@@ -4,14 +4,15 @@ Main window: load specifications, pick a design, view the mockup and export API 
 from __future__ import annotations
 
 import copy
+import hashlib
 import logging
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from PyQt6.QtCore import QPoint, Qt
+from PyQt6.QtCore import QPoint, Qt, QTimer
 from PyQt6.QtGui import QAction, QActionGroup, QCloseEvent, QFont, QGuiApplication, QKeySequence
 from PyQt6.QtWidgets import (
     QAbstractItemView,
@@ -21,6 +22,7 @@ from PyQt6.QtWidgets import (
     QDialog,
     QFileDialog,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QListWidget,
     QListWidgetItem,
@@ -49,16 +51,31 @@ from ..i18n import LANGUAGES, tr, translator
 from ..id_check import check_ids
 from ..layout_engine import LayoutEngine, LayoutOptions
 from ..layout_overrides import (
+    CellRef,
+    LayoutFileError,
+    LayoutRefused,
     TabOverride,
+    add_section,
+    apply_layout,
     apply_override,
     deletable_labels,
+    delete_empty_row,
     delete_fields,
+    from_json,
+    insert_row,
+    move_cell,
+    override_from_dict,
+    override_to_dict,
+    rename_section,
+    reset_layout,
     restore_fields,
     tab_labels,
     toggle_verify,
+    with_capture,
 )
+from ..layout_overrides import to_json as layouts_to_json
 from ..merge_advisor import DEFAULT_THRESHOLD, MergeSuggestion, apply_merges, manual_merge_info, suggest_merges
-from ..models import PassportTab, Severity, SpecModel, norm
+from ..models import PassportTab, SectionStyle, Severity, SpecModel, norm
 from ..payload import (
     ENDPOINT,
     PayloadOptions,
@@ -134,6 +151,15 @@ class MainWindow(QMainWindow):
         # Manual marks and deletions per passport name, plus a stack for undo.
         self.overrides: dict[str, TabOverride] = {}
         self._undo_stack: list[dict[str, TabOverride]] = []
+        self._redo_stack: list[dict[str, TabOverride]] = []
+        # Alle bewaarde indelingen (ook van andere profielen), sleutel 'profiel|paspoortnaam'; automatisch bewaard
+        # na 500 ms rust. / All stored layouts (other profiles too), key 'profile|passport name'; autosaved after
+        # 500 ms of rest.
+        self._layout_store: dict[str, TabOverride] = {}
+        self._save_timer = QTimer(self)
+        self._save_timer.setSingleShot(True)
+        self._save_timer.setInterval(500)
+        self._save_timer.timeout.connect(self._save_layouts)
         self.imported_sheets: list[ImportedSheet] = []
         self._busy = False
         self._actions: list[QAction] = []
@@ -183,6 +209,12 @@ class MainWindow(QMainWindow):
         self.mockup.show_extra_tabs = self.settings.boolean("view/extra_tabs", True)
         self.views.addTab(self.mockup, "")
         self.sheet_preview = SheetPreview()
+        self.sheet_preview.move_requested.connect(self._on_move_requested)
+        self.sheet_preview.insert_row_requested.connect(self._on_insert_row)
+        self.sheet_preview.delete_row_requested.connect(self._on_delete_row)
+        self.sheet_preview.add_section_requested.connect(self._on_add_section)
+        self.sheet_preview.rename_section_requested.connect(self._on_rename_section)
+        self.sheet_preview.reset_requested.connect(self._on_reset_layout)
         self.views.addTab(self.sheet_preview, "")
         self.views.addTab(self._build_payload_tab(), "")
         self.validation_list = QListWidget()
@@ -390,10 +422,18 @@ class MainWindow(QMainWindow):
         self.restore_action = self._action("verify.restore", self.restore_dialog)
         self.undo_action = self._action("verify.undo", self.undo_override, QKeySequence.StandardKey.Undo)
         self.undo_action.setEnabled(False)
+        self.redo_action = self._action("layout.redo", self.redo_override, QKeySequence.StandardKey.Redo)
+        self.redo_action.setEnabled(False)
+        self.save_layout_action = self._action("layout.save", self.save_layout)
+        self.load_layout_action = self._action("layout.load", self.load_layout_dialog)
+        self.file_menu.insertAction(self.merge_selected_action, self.save_layout_action)
+        self.file_menu.insertAction(self.merge_selected_action, self.load_layout_action)
+        self.file_menu.insertSeparator(self.merge_selected_action)
         for action in (self.mark_action, self.delete_action, self.delete_marked_action, self.restore_action):
             self.edit_menu.addAction(action)
         self.edit_menu.addSeparator()
         self.edit_menu.addAction(self.undo_action)
+        self.edit_menu.addAction(self.redo_action)
 
         self.payload_settings_action = self._action("action.payload_settings", self.edit_payload_settings)
         self.settings_menu.addAction(self.payload_settings_action)
@@ -487,8 +527,12 @@ class MainWindow(QMainWindow):
         self._refresh_views()
 
     def _set_profile(self, key: str) -> None:
+        self._flush_layouts()  # de indeling hoort bij het profiel / the layout belongs to the profile
         self.profile = PROFILES[key]
         self.settings.set("design/profile", key)
+        if self.spec is not None:
+            self._reset_overrides()
+            self._load_layouts()
         self._rebuild_designs()
 
     def _set_language(self, code: str) -> None:
@@ -545,6 +589,8 @@ class MainWindow(QMainWindow):
         self.spec.filter_column = self.spec.resolve_filter_column(
             self.spec.filter_column or self.settings.string("design/filter_column", ""),
         )
+        if replace:
+            self._load_layouts()
         self._populate_columns()
         self._rebuild_designs()
         self.statusBar().showMessage(
@@ -780,8 +826,9 @@ class MainWindow(QMainWindow):
         self._preview = None
         self._reset_overrides()
         for entry in self.imported_sheets:
-            if entry.sheet.verify or entry.sheet.deleted:
-                self.overrides[entry.sheet.tab.name] = TabOverride(verify=frozenset(entry.sheet.verify))
+            restored = self._imported_override(entry.sheet)
+            if restored is not None:
+                self.overrides[entry.sheet.tab.name] = restored
         self.back_action.setEnabled(True)
         self._update_merge_state()
         self._fill_filter_list()
@@ -809,6 +856,7 @@ class MainWindow(QMainWindow):
         self._clear_import()
         self._reset_overrides()
         if self.spec is not None:
+            self._load_layouts()
             self._rebuild_designs()
         else:
             self.tabs = []
@@ -1002,16 +1050,29 @@ class MainWindow(QMainWindow):
 
     # --- markeren en verwijderen / marking and deleting -----------------------------------------------------
 
-    def _effective(self, tab: PassportTab | None) -> tuple[PassportTab | None, set[str]]:
-        """Het paspoort zonder verwijderde velden en de gemarkeerde veldnamen. / The passport without deleted fields
-        and the marked field names."""
+    def _effective(
+        self, tab: PassportTab | None, *, keep_empty: bool = False,
+    ) -> tuple[PassportTab | None, set[str]]:
+        """Het paspoort met de gebruikersindeling en zonder verwijderde velden, plus de gemarkeerde veldnamen. Eén
+        plek voor alle uitvoer (mockup, ontwerpblad, Excel, PNG, payload). / The passport with the user layout and
+        without deleted fields, plus the marked field names. One place for all output (mockup, design sheet, Excel,
+        PNG, payload)."""
         if tab is None:
             return None, set()
-        return apply_override(tab, self.overrides.get(tab.name, TabOverride()))
+        return apply_override(tab, self.overrides.get(tab.name, TabOverride()), keep_empty=keep_empty)
+
+    def _single_tab(self, tab: PassportTab, object_type: str) -> PassportTab:
+        """Het paspoort voor één objecttype, met dezelfde indeling en verwijderingen. / The passport for one object
+        type, with the same layout and deletions."""
+        if self.engine is None or self.imported is not None:
+            return self._effective(tab)[0] or tab
+        single = self.engine.build_single(tab, object_type)
+        return apply_override(single, self.overrides.get(tab.name, TabOverride()))[0]
 
     def _reset_overrides(self) -> None:
         self.overrides.clear()
         self._undo_stack.clear()
+        self._redo_stack.clear()
 
     def _change_override(self, change: Callable[[TabOverride], TabOverride]) -> None:
         """Pas het huidige paspoort aan, met een momentopname voor ongedaan maken. / Change the current passport, with
@@ -1025,17 +1086,212 @@ class MainWindow(QMainWindow):
             return
         self._undo_stack.append(dict(self.overrides))
         del self._undo_stack[:-50]
+        self._redo_stack.clear()
         if updated.is_empty:
             self.overrides.pop(tab.name, None)
         else:
             self.overrides[tab.name] = updated
+        self._schedule_save()
         self._refresh_views()
 
     def undo_override(self) -> None:
         if not self._undo_stack:
             return
+        self._redo_stack.append(dict(self.overrides))
         self.overrides = self._undo_stack.pop()
+        self._schedule_save()
         self._refresh_views()
+
+    def redo_override(self) -> None:
+        if not self._redo_stack:
+            return
+        self._undo_stack.append(dict(self.overrides))
+        self.overrides = self._redo_stack.pop()
+        self._schedule_save()
+        self._refresh_views()
+
+    # --- indeling: slepen en neerzetten / layout: drag and drop ----------------------------------------------
+
+    def _edit_layout(self, change: Callable[[TabOverride], TabOverride]) -> None:
+        """Pas de indeling van het getoonde paspoort aan; weigeringen komen in de statusbalk. / Change the layout of
+        the shown passport; refusals go to the status bar."""
+        tab = self.current_tab()
+        if tab is None:
+            return
+        if self.selected_object_type():
+            self.statusBar().showMessage(tr("layout.pick_all_types"))
+            return
+        displayed = self._effective(tab, keep_empty=True)[0]
+        if displayed is None:
+            return
+        base = with_capture(self.overrides.get(tab.name, TabOverride()), displayed)
+        try:
+            updated = change(base)
+        except LayoutRefused as exc:
+            self.statusBar().showMessage(tr(f"layout.{exc.code}", max=tab.profile.grid_columns))
+            return
+        if updated.layout == base.layout:
+            return
+        self._change_override(lambda _current: updated)
+
+    def _on_move_requested(self, source: object, target: object) -> None:
+        tab = self.current_tab()
+        if tab is None or not isinstance(source, CellRef) or not isinstance(target, CellRef):
+            return
+        columns = tab.profile.grid_columns
+        self._edit_layout(lambda o: move_cell(o, source=source, target=target, max_columns=columns))
+
+    def _on_insert_row(self, section: int, row: int) -> None:
+        self._edit_layout(lambda o: insert_row(o, section=section, row=row))
+
+    def _on_delete_row(self, section: int, row: int) -> None:
+        self._edit_layout(lambda o: delete_empty_row(o, section=section, row=row))
+
+    def _ask_section(self, title: str = "", *, with_style: bool = True) -> tuple[str, SectionStyle] | None:
+        """Vraag titel (en stijl) van een sectie; None bij annuleren. / Ask the title (and style) of a section; None
+        on cancel."""
+        text, ok = QInputDialog.getText(self, tr("app.title"), tr("layout.section_prompt"), text=title)
+        if not ok:
+            return None
+        style = SectionStyle.PLAIN
+        if with_style:
+            labels = [tr("layout.style_plain"), tr("layout.style_semantic")]
+            choice, ok = QInputDialog.getItem(self, tr("app.title"), tr("layout.style_prompt"), labels, 0, False)
+            if not ok:
+                return None
+            style = SectionStyle.SEMANTIC if choice == labels[1] else SectionStyle.PLAIN
+        return text, style
+
+    def _on_add_section(self, after: int) -> None:
+        if self.selected_object_type():
+            self.statusBar().showMessage(tr("layout.pick_all_types"))
+            return
+        asked = self._ask_section()
+        if asked is not None:
+            title, style = asked
+            self._edit_layout(lambda o: add_section(o, after=after, title=title, style=style))
+
+    def _on_rename_section(self, section: int) -> None:
+        shown = self._effective(self.current_tab(), keep_empty=True)[0]
+        if shown is None or self.selected_object_type() or not 0 <= section < len(shown.sections):
+            self.statusBar().showMessage(tr("layout.pick_all_types"))
+            return
+        asked = self._ask_section(shown.sections[section].title, with_style=False)
+        if asked is not None:
+            self._edit_layout(lambda o: rename_section(o, section=section, title=asked[0]))
+
+    def _on_reset_layout(self) -> None:
+        self._change_override(reset_layout)
+        self.statusBar().showMessage(tr("layout.reset_done"))
+
+    # --- indeling: bewaren / layout: persistence -------------------------------------------------------------
+
+    def _layout_key(self, tab_name: str) -> str:
+        return f"{self.profile.key}|{tab_name}"
+
+    def _layout_file(self) -> Path | None:
+        """Bestand voor de huidige specificaties (vingerafdruk = gesorteerde bronbestandsnamen). / File for the
+        current specifications (fingerprint = sorted source file names)."""
+        if self.spec is None:
+            return None
+        digest = hashlib.sha1("\n".join(sorted(self.spec.sources)).encode("utf-8")).hexdigest()[:16]
+        return self.settings.layouts_dir() / f"{digest}.json"
+
+    def _imported_override(self, sheet: RefinedSheet) -> TabOverride | None:
+        """Markeringen en indeling uit een ingelezen blad. / Marks and layout from an imported sheet."""
+        stored = TabOverride()
+        if sheet.layout:
+            try:
+                stored = override_from_dict(sheet.layout)
+            except LayoutFileError:
+                log.warning("Layout metadata of sheet %s is not usable", sheet.name)
+        verify = frozenset(sheet.verify) | stored.verify
+        result = replace(stored, verify=verify, deleted=frozenset())
+        return None if result.is_empty else result
+
+    def _load_layouts(self) -> None:
+        """Lees de bewaarde indeling bij de huidige specificaties; onleesbaar = negeren. / Read the stored layout for
+        the current specifications; unreadable = ignore."""
+        self._layout_store = {}
+        path = self._layout_file()
+        if path is not None and path.exists():
+            try:
+                self._layout_store = from_json(path.read_text(encoding="utf-8"))
+            except (OSError, LayoutFileError):
+                log.warning("Stored layout %s is not usable and is ignored", path)
+        self._apply_store()
+
+    def _apply_store(self) -> None:
+        prefix = self._layout_key("")
+        self.overrides = {k[len(prefix):]: o for k, o in self._layout_store.items() if k.startswith(prefix)}
+        self._undo_stack.clear()
+        self._redo_stack.clear()
+
+    def _schedule_save(self) -> None:
+        if self.imported is None and self.spec is not None:
+            self._save_timer.start()
+
+    def _flush_layouts(self) -> None:
+        if self._save_timer.isActive():
+            self._save_timer.stop()
+            self._save_layouts()
+
+    def _collect_store(self) -> dict[str, TabOverride]:
+        prefix = self._layout_key("")
+        store = {k: o for k, o in self._layout_store.items() if not k.startswith(prefix)}
+        store.update({self._layout_key(name): o for name, o in self.overrides.items() if not o.is_empty})
+        return store
+
+    def _save_layouts(self) -> None:
+        """Bewaar de indeling (zonder geheimen) in de app-gegevensmap. / Store the layout (no secrets) in the app data
+        folder."""
+        path = self._layout_file()
+        if path is None or self.imported is not None:
+            return
+        self._layout_store = self._collect_store()
+        try:
+            path.write_text(layouts_to_json(self._layout_store), encoding="utf-8")
+        except OSError:
+            log.exception("Cannot store the layout in %s", path)
+
+    def save_layout(self) -> None:
+        """Bestand → Indeling opslaan…: wissel de indeling uit als JSON. / Save the layout as a JSON file."""
+        if not self._require_tabs():
+            return
+        path = self._save_path("layout.save", "Layout.json", "layout.filter")
+        if path:
+            self.write_layout_file(path)
+
+    def write_layout_file(self, path: str) -> None:
+        if self._write_text(path, layouts_to_json(self._collect_store())):
+            self.statusBar().showMessage(tr("layout.saved", path=path))
+
+    def load_layout_dialog(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, tr("layout.load"), self.settings.string("paths/last", str(Path.home())), tr("layout.filter"),
+        )
+        if path:
+            self.load_layout(path)
+
+    def load_layout(self, path: str) -> None:
+        """Lees een indelingsbestand; een fout laat de huidige indeling ongemoeid. / Read a layout file; an error leaves
+        the current layout untouched."""
+        try:
+            loaded = from_json(Path(path).read_text(encoding="utf-8"))
+        except OSError as exc:
+            self._warn(tr("layout.file_error", detail=str(exc)))
+            return
+        except LayoutFileError as exc:
+            self._warn(tr("layout.file_error", detail=str(exc)))
+            return
+        self._undo_stack.append(dict(self.overrides))
+        self._redo_stack.clear()
+        self._layout_store = {**self._collect_store(), **loaded}
+        prefix = self._layout_key("")
+        self.overrides = {k[len(prefix):]: o for k, o in self._layout_store.items() if k.startswith(prefix)}
+        self._schedule_save()
+        self._refresh_views()
+        self.statusBar().showMessage(tr("layout.loaded", count=len(loaded)))
 
     def _selected_labels(self) -> list[str]:
         return self.sheet_preview.selected_labels()
@@ -1170,11 +1426,13 @@ class MainWindow(QMainWindow):
     def preview_tab(self) -> PassportTab | None:
         """Het getoonde paspoort: voor één objecttype zonder de velden die daar niet voor gelden.
         The passport shown: for one object type without the fields that do not apply to it."""
-        tab = self._effective(self.current_tab())[0]
+        tab = self.current_tab()
         object_type = self.selected_object_type()
-        if tab is None or not object_type or self.engine is None or self.imported is not None:
-            return tab
-        return self.engine.build_single(tab, object_type)
+        if tab is None:
+            return None
+        if not object_type or self.engine is None or self.imported is not None:
+            return self._effective(tab, keep_empty=True)[0]
+        return self._single_tab(tab, object_type)
 
     # --- samenvoegen / merging -------------------------------------------------------------------------------
 
@@ -1349,14 +1607,17 @@ class MainWindow(QMainWindow):
         verify = verify_all if self.verify_marks_action.isChecked() else set()
         entry = self._imported_entry(base)
         deleted = bool(base is not None and self.overrides.get(base.name, TabOverride()).deleted)
+        modified = deleted or bool(base is not None and self.overrides.get(base.name, TabOverride()).layout)
         muted = self._muted_labels(shown)
         self._update_minimal_state()
         self.undo_action.setEnabled(bool(self._undo_stack))
+        self.redo_action.setEnabled(bool(self._redo_stack))
+        self.sheet_preview.editable = base is not None and not self.selected_object_type()
         marks, legend = self._minimal_info(shown, self.selected_object_type())
         self.mockup.show_tab(
             shown, self.selected_object_type(), PALETTES[self.theme_name],
-            entry.sheet.column_widths if entry and not deleted else None, self.current_highlights(base),
-            entry.sheet.positions if entry and not deleted else None,
+            entry.sheet.column_widths if entry and not modified else None, self.current_highlights(base),
+            entry.sheet.positions if entry and not modified else None,
             muted=muted, minimal=marks, legend=legend, verify=verify,
         )
         self.sheet_preview.show_tab(shown, muted=muted, minimal=marks, legend=legend, verify=verify)
@@ -1378,8 +1639,16 @@ class MainWindow(QMainWindow):
                     f"{SEVERITY_MARK[Severity.WARNING]} {tr('sev.warning')}: {tr('spec.orphan', name=name)}",
                 )
         if base is not None:
+            override = self.overrides.get(base.name, TabOverride())
+            if override.layout is not None:
+                _, layout_warnings, layout_infos = apply_layout(base, override)
+                for severity, items in ((Severity.WARNING, layout_warnings), (Severity.INFO, layout_infos)):
+                    for message in items:
+                        self.validation_list.addItem(
+                            f"{SEVERITY_MARK[severity]} {tr(f'sev.{severity.value}')}: {message}",
+                        )
             names = tab_labels(base)
-            for key in sorted(self.overrides.get(base.name, TabOverride()).deleted):
+            for key in sorted(override.deleted):
                 message = tr("verify.deleted_info", field=names.get(key, key))
                 self.validation_list.addItem(f"{SEVERITY_MARK[Severity.INFO]} {tr('sev.info')}: {message}")
 
@@ -1440,6 +1709,9 @@ class MainWindow(QMainWindow):
                 minimal_by_tab={t.name: self._minimal_info(self._effective(t)[0] or t) for t in self.tabs}
                 if self._minimal_on() else None,
                 verify_by_tab=verify, deleted_by_tab=deleted,
+                layout_by_tab={
+                    t.name: override_to_dict(o) for t in self.tabs if (o := self.overrides.get(t.name)) and o.layout
+                },
             )
         except (OSError, ValueError) as exc:
             log.exception("Excel export failed")
@@ -1458,15 +1730,13 @@ class MainWindow(QMainWindow):
         path = self._save_path("dialog.save_excel", "Paspoortinrichting per objecttype.xlsx", "dialog.filter_xlsx")
         if not path:
             return
-        engine = self.engine
         verify, deleted = self._export_overrides()
         pairs: list[tuple[PassportTab, str]] = []
         verify_by_name: dict[str, set[str]] = {}
         deleted_by_name: dict[str, set[str]] = {}
         for tab in self.tabs:
-            effective = self._effective(tab)[0] or tab
             for o in tab.object_types:
-                single = engine.build_single(effective, o.name)
+                single = self._single_tab(tab, o.name)
                 pairs.append((single, o.name))
                 verify_by_name[o.name] = verify.get(tab.name, set()) & set(tab_labels(single))
                 deleted_by_name[o.name] = deleted.get(tab.name, set())
@@ -1518,7 +1788,7 @@ class MainWindow(QMainWindow):
         if not folder:
             return
         for tab in self.tabs:
-            payload = build_tab_payload(tab, self.ids, self.options)
+            payload = build_tab_payload(self._effective(tab)[0] or tab, self.ids, self.options)
             target = Path(folder) / f"{safe_filename(tab.name)}.json"
             if not self._write_text(str(target), self.payload_string(payload, fmt=0)):
                 return
@@ -1545,5 +1815,6 @@ class MainWindow(QMainWindow):
         return bar if bar is not None else QStatusBar(self)
 
     def closeEvent(self, a0: QCloseEvent | None) -> None:  # noqa: N802 - Qt-naam / Qt name
+        self._flush_layouts()
         self.settings.set("ui/language", translator.language)
         super().closeEvent(a0)

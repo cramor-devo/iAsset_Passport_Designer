@@ -3,15 +3,30 @@ Preview of the Excel design sheet (same layout and colours as the export / the p
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from openpyxl.utils import get_column_letter
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QBrush, QColor, QFont, QGradient, QLinearGradient
+from PyQt6.QtCore import QByteArray, QMimeData, QPoint, Qt, pyqtSignal
+from PyQt6.QtGui import (
+    QBrush,
+    QColor,
+    QDrag,
+    QDragEnterEvent,
+    QDragMoveEvent,
+    QDropEvent,
+    QFont,
+    QGradient,
+    QLinearGradient,
+)
 from PyQt6.QtWidgets import QAbstractItemView, QMenu, QTableWidget, QTableWidgetItem, QWidget
 
 from ..dataset_flags import MinimalMark
 from ..excel_export import SheetCell, SheetLayout, sheet_layout
 from ..i18n import tr
+from ..layout_overrides import CellRef
 from ..models import PassportTab
+
+CELL_MIME = "application/x-passport-designer-cell"  # veld dat versleept wordt / field being dragged
 
 PIXELS_PER_CHAR = 7  # Excel-kolombreedte (tekens) -> pixels / Excel column width (characters) -> pixels
 DEFAULT_WIDTH = 9
@@ -29,6 +44,14 @@ class SheetPreview(QTableWidget):
     delete_requested = pyqtSignal(list)  # velden verwijderen / delete fields
     delete_marked_requested = pyqtSignal()  # alle gemarkeerde velden verwijderen / delete all marked fields
     restore_requested = pyqtSignal()  # verwijderde velden herstellen / restore deleted fields
+    # Indeling (slepen en neerzetten); de Ontwerpblad-weergave praat alleen via deze signalen met het hoofdvenster.
+    # Layout (drag and drop); the design sheet talks to the main window only through these signals.
+    move_requested = pyqtSignal(object, object)  # (bron CellRef, doel CellRef) / (source, target)
+    insert_row_requested = pyqtSignal(int, int)  # (sectie, rij) / (section, row)
+    delete_row_requested = pyqtSignal(int, int)
+    add_section_requested = pyqtSignal(int)  # onder sectie / below section
+    rename_section_requested = pyqtSignal(int)
+    reset_requested = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -37,6 +60,16 @@ class SheetPreview(QTableWidget):
         self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.setWordWrap(True)
         self.setStyleSheet(SHEET_STYLE)
+        # Qt mag zelf nooit items verplaatsen: elke wijziging gaat via het model. / Qt must never move items itself:
+        # every change goes through the model.
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
+        self.setDefaultDropAction(Qt.DropAction.IgnoreAction)
+        self.setDropIndicatorShown(True)
+        self.editable = True
+        self._layout: SheetLayout | None = None
+        self._refs: dict[tuple[int, int], CellRef] = {}
 
     def show_tab(
         self, tab: PassportTab | None, *, muted: set[str] | None = None, minimal: dict[str, MinimalMark] | None = None,
@@ -44,11 +77,13 @@ class SheetPreview(QTableWidget):
     ) -> None:
         self.clearSpans()
         self.clear()
+        self._layout, self._refs = None, {}
         if tab is None:
             self.setRowCount(0)
             self.setColumnCount(0)
             return
         layout = sheet_layout(tab, muted=muted, minimal=minimal, legend=legend, verify=verify)
+        self._layout = layout
         self.setRowCount(layout.row_count)
         self.setColumnCount(layout.column_count)
         self.setHorizontalHeaderLabels([get_column_letter(c) for c in range(1, layout.column_count + 1)])
@@ -72,6 +107,8 @@ class SheetPreview(QTableWidget):
                 font.setPointSize(cell.size)
             item.setFont(font)
             self.setItem(cell.row - 1, cell.column - 1, item)
+            if cell.ref is not None:
+                self._refs[(cell.row - 1, cell.column - 1)] = cell.ref
             last = cell.merge_to or _overflow_end(cell, layout)
             if last > cell.column:
                 self.setSpan(cell.row - 1, cell.column - 1, 1, last - cell.column + 1)
@@ -86,7 +123,7 @@ class SheetPreview(QTableWidget):
                 labels.append(str(key))
         return labels
 
-    def context_menu(self, labels: list[str]) -> QMenu:
+    def context_menu(self, labels: list[str], target: CellRef | None = None) -> QMenu:
         """Contextmenu voor ``labels``; de acties sturen de signalen uit. / Context menu for ``labels``; the actions
         emit the signals."""
         menu = QMenu(self)
@@ -104,7 +141,31 @@ class SheetPreview(QTableWidget):
             action = menu.addAction(tr(text))
             if action is not None:
                 action.triggered.connect(lambda _checked=False, s=signal: s.emit())
+        self._add_layout_actions(menu, target)
         return menu
+
+    def _add_layout_actions(self, menu: QMenu, target: CellRef | None) -> None:
+        """Acties voor rijen en secties; alleen als de indeling bewerkbaar is. / Row and section actions; only when
+        the layout is editable."""
+        menu.addSeparator()
+        enabled = self.editable and target is not None
+        section = target.section if target is not None else 0
+        row = max(target.row, 0) if target is not None else 0
+        has_row = target is not None and target.row >= 0
+        entries: list[tuple[str, bool, Callable[[], None]]] = [
+            ("layout.insert_above", has_row, lambda: self.insert_row_requested.emit(section, row)),
+            ("layout.insert_below", has_row, lambda: self.insert_row_requested.emit(section, row + 1)),
+            ("layout.new_section", True, lambda: self.add_section_requested.emit(section)),
+            ("layout.rename_section", True, lambda: self.rename_section_requested.emit(section)),
+            ("layout.delete_row", has_row, lambda: self.delete_row_requested.emit(section, row)),
+            ("layout.reset", True, lambda: self.reset_requested.emit()),
+        ]
+        for key, applies, callback in entries:
+            action = menu.addAction(tr(key))
+            if action is None:
+                continue
+            action.setEnabled(enabled and (applies or key == "layout.reset"))
+            action.triggered.connect(lambda _checked=False, c=callback: c())
 
     def contextMenuEvent(self, event) -> None:  # type: ignore[no-untyped-def]  # noqa: N802
         """Klik met rechts: een niet-geselecteerde veldcel wordt eerst geselecteerd. / Right-click: an unselected field
@@ -113,7 +174,75 @@ class SheetPreview(QTableWidget):
         if item is not None and not item.isSelected():
             self.clearSelection()
             item.setSelected(True)
-        self.context_menu(self.selected_labels()).exec(event.globalPos())
+        self.context_menu(self.selected_labels(), self.target_at(event.pos())).exec(event.globalPos())
+
+    # --- slepen en neerzetten / drag and drop ----------------------------------------------------------------
+
+    def target_at(self, pos: QPoint) -> CellRef | None:
+        """Plek in het paspoort onder ``pos`` (sectiekop = rij -1), of None. / Position in the passport under ``pos``
+        (section heading = row -1), or None."""
+        if self._layout is None:
+            return None
+        index = self.indexAt(pos)
+        if not index.isValid():
+            return None
+        ref = self._layout.row_refs.get(index.row() + 1)
+        if ref is None:
+            return None
+        section, row = ref
+        return CellRef(section, row, 0 if row < 0 else index.column())
+
+    def startDrag(self, supportedActions) -> None:  # type: ignore[no-untyped-def]  # noqa: N802
+        """Start het slepen van het huidige veld; Qt verplaatst zelf niets. / Start dragging the current field; Qt
+        moves nothing itself."""
+        item = self.currentItem()
+        ref = self._refs.get((item.row(), item.column())) if item is not None else None
+        if not self.editable or ref is None:
+            return
+        mime = QMimeData()
+        mime.setData(CELL_MIME, QByteArray(f"{ref.section},{ref.row},{ref.col}".encode()))
+        drag = QDrag(self)
+        drag.setMimeData(mime)
+        drag.exec(Qt.DropAction.MoveAction)
+
+    @staticmethod
+    def _source_of(mime: QMimeData | None) -> CellRef | None:
+        if mime is None or not mime.hasFormat(CELL_MIME):
+            return None
+        try:
+            section, row, col = (int(x) for x in bytes(mime.data(CELL_MIME).data()).decode().split(","))
+        except ValueError:
+            return None
+        return CellRef(section, row, col)
+
+    def dragEnterEvent(self, e: QDragEnterEvent | None) -> None:  # noqa: N802
+        if e is not None and self.editable and self._source_of(e.mimeData()) is not None:
+            e.acceptProposedAction()
+        elif e is not None:
+            e.ignore()
+
+    def dragMoveEvent(self, e: QDragMoveEvent | None) -> None:  # noqa: N802
+        if e is None:
+            return
+        allowed = self.editable and self._source_of(e.mimeData()) is not None
+        if allowed and self.target_at(e.position().toPoint()) is not None:
+            e.acceptProposedAction()  # de dropindicator toont het doel / the drop indicator shows the target
+        else:
+            e.ignore()
+
+    def dropEvent(self, event: QDropEvent | None) -> None:  # noqa: N802
+        """Zet neer: nooit het standaardgedrag van Qt (dat verplaatst items), alleen een verzoek aan het model.
+        Drop: never Qt's default (which moves items), only a request to the model."""
+        if event is None:
+            return
+        source = self._source_of(event.mimeData())
+        target = self.target_at(event.position().toPoint())
+        if self.editable and source is not None and target is not None:
+            self._handle_drop(source, target)
+        event.accept()
+
+    def _handle_drop(self, source: CellRef, target: CellRef) -> None:
+        self.move_requested.emit(source, target)
 
     def text_at(self, row: int, column: int) -> str:
         """Tekst in een cel (1-gebaseerd, zoals Excel). / Text in a cell (1-based, like Excel)."""
