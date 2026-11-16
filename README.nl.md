@@ -19,7 +19,7 @@ De interface is beschikbaar in het Nederlands en het Engels (**Beeld → Taal**)
 
 ## Downloaden (Windows)
 
-Download `iAsset_Passport_Designer.exe` bij de nieuwste [release](../../releases). Het is één bestand en je hebt er
+Download `iAsset Passport Designer vX.Y.Z.exe` (bijvoorbeeld `iAsset Passport Designer v0.5.0.exe`) bij de nieuwste [release](../../releases). Het is één bestand en je hebt er
 geen Python voor nodig. Het programma is niet digitaal ondertekend, dus Windows SmartScreen kan bij de eerste keer
 starten een waarschuwing geven.
 
@@ -29,7 +29,8 @@ Wil je het programma zelf bouwen? Gebruik dan:
 powershell -ExecutionPolicy Bypass -File build.ps1
 ```
 
-Het resultaat komt in `dist\iAsset_Passport_Designer.exe`.
+Het resultaat komt in `dist\iAsset Passport Designer vX.Y.Z.exe`; de versie komt uit `__version__`. De venstertitel
+toont dezelfde versie.
 
 ### Een release maken
 
@@ -38,8 +39,8 @@ Lokaal bouwen is niet nodig voor een release. Zet `__version__` in `passport_des
 release `v<versie>` (zie [Ontwikkelen](#ontwikkelen)).
 
 Je kunt ook zelf een GitHub-release publiceren met tag `vX.Y.Z` (gelijk aan de versie). De workflow **Release** draait
-dan de tests op `windows-latest`, bouwt de exe met `build.ps1` en hangt `iAsset_Passport_Designer.exe` en
-`iAsset_Passport_Designer.exe.sha256` aan die release. Wil je een bestaande release opnieuw bouwen of het
+dan de tests op `windows-latest`, bouwt de exe met `build.ps1` en hangt `iAsset Passport Designer vX.Y.Z.exe` en
+`iAsset Passport Designer vX.Y.Z.exe.sha256` aan die release. Wil je een bestaande release opnieuw bouwen of het
 SHA256-bestand toevoegen, start de workflow dan handmatig (**Actions → Release → Run workflow**) met de tag.
 
 ## Installeren vanuit de broncode

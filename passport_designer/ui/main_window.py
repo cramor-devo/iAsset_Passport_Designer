@@ -775,7 +775,8 @@ class MainWindow(QMainWindow):
         return True
 
     def _update_title(self) -> None:
-        title = tr("app.title")
+        # NL: Titel met versie, bv. "... v0.5.0 — bestand". / EN: Title with version, e.g. "... v0.5.0 — file".
+        title = f"{tr('app.title')} v{__version__}"
         if self.imported is not None:
             title += f" — {tr('import.window', name=self.imported.path.name)}"
         self.setWindowTitle(title)

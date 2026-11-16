@@ -12,6 +12,7 @@ from conftest import make_spec  # noqa: E402
 from PyQt6.QtCore import QSettings  # noqa: E402
 from PyQt6.QtWidgets import QApplication  # noqa: E402
 
+from passport_designer import __version__  # noqa: E402
 from passport_designer.i18n import TRANSLATIONS, translator  # noqa: E402
 from passport_designer.settings import AppSettings  # noqa: E402
 from passport_designer.ui.main_window import MainWindow  # noqa: E402
@@ -53,6 +54,10 @@ def test_language_switch_changes_texts(window):
     assert window.filter_label.text() == TRANSLATIONS["panel.filters"]["nl"]
     window._set_language("en")
     assert window.filter_label.text() == TRANSLATIONS["panel.filters"]["en"]
+
+
+def test_window_title_contains_version(window):
+    assert window.windowTitle() == f"iAsset Passport Designer v{__version__}"
 
 
 def test_merge_suggestions_apply_and_reset_in_ui(window):
@@ -212,6 +217,7 @@ def test_import_round_trip_in_window_has_no_differences(window, exported_file):
     assert window.imported is not None and not window._busy
     assert [t.name for t in window.tabs] == original and window.filter_list.count() == len(original)
     assert window.back_action.isEnabled() and "design.xlsx" in window.windowTitle()
+    assert f"v{__version__}" in window.windowTitle()  # versie blijft ook tijdens import / version stays during import
     assert all(entry.diff is not None and entry.diff.is_empty for entry in window.imported_sheets)
     assert "No differences" in crossref_texts(window)
     window._set_language("nl")
@@ -221,7 +227,8 @@ def test_import_round_trip_in_window_has_no_differences(window, exported_file):
     assert "POST /passport-tabs" in window.payload_text.toPlainText()
     window.back_to_generated()
     assert window.imported is None and not window.back_action.isEnabled()
-    assert [t.name for t in window.tabs] == original and window.windowTitle() == "iAsset Passport Designer"
+    assert [t.name for t in window.tabs] == original
+    assert window.windowTitle() == f"iAsset Passport Designer v{__version__}"
 
 
 def test_import_without_spec_and_with_changes(window, exported_file, wave1_spec):

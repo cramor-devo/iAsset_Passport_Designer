@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0
+- Changed: the exe is named `iAsset Passport Designer vX.Y.Z.exe` (with spaces and the version), and so are its SHA256
+  file and the release assets. The window title shows the version too. Old download links to
+  `iAsset_Passport_Designer.exe` and `releases/latest/download/...` no longer work. The app name, saved settings and log
+  folder are unchanged.
+
 ## 0.4.0
 - The `POST /passport-tabs` payload now matches what iAsset really stores (verified against a real `GET /templates/tabs`):
   layout elements (`field_type` 2: row 10, line 1, *Actoren en rollen* 11, *Memo* 19, relations 17–27 incl.
