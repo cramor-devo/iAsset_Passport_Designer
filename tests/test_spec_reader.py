@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from openpyxl import Workbook
 
+from passport_designer.models import AttributeFlags
 from passport_designer.spec_reader import SpecError, read_spec
 
 
@@ -104,3 +105,74 @@ def test_objecttypen_without_any_filter_column_raise_spec_error(tmp_path: Path):
     path = _types_sheet(tmp_path / "bad.xlsx", ["Objecttype", "Systeem"], [["Aansluitput", "Wave 2"]])
     with pytest.raises(SpecError):
         read_spec(path)
+
+
+def _attrs_file(path: Path, header: list[str], rows: list[list[str]]) -> Path:
+    workbook = Workbook()
+    types = workbook.active
+    assert types is not None
+    types.title = "Objecttypen"
+    types.append(["Objecttype", "Filter"])
+    types.append(["Aansluitput", "Putten"])
+    attrs = workbook.create_sheet("Attributen")
+    attrs.append(["Titel"])  # rij 1 is een titel; de kopregel staat op rij 2 / row 2 holds the header
+    attrs.append(header)
+    for row in rows:
+        attrs.append(row)
+    workbook.save(path)
+    return path
+
+
+def test_reads_opnemen_and_minimal_dataset(tmp_path: Path):
+    path = _attrs_file(
+        tmp_path / "flags.xlsx",
+        ["Objecttype", "Attribuut", "Opnemen", "MinimaleDataset"],
+        [["Aansluitput", "diameter", "Ja", "Ja"], ["Aansluitput", "geheim", "Nee", "Nee"],
+         ["Aansluitput", "kleur", "Ja", "Nee"]],
+    )
+    spec = read_spec(path)
+    assert spec.flag(object_type="Aansluitput", attribute="diameter") == AttributeFlags(True, True)
+    assert spec.flag(object_type="Aansluitput", attribute="geheim") == AttributeFlags(False, False)
+    assert spec.flag(object_type="Aansluitput", attribute="kleur") == AttributeFlags(True, False)
+    assert spec.excluded["Aansluitput"] == {"geheim"}
+    assert spec.has_minimal_flags is True
+
+
+@pytest.mark.parametrize("header", ["Minimale dataset", "MINIMALEDATASET"])
+def test_minimal_dataset_header_variants(tmp_path: Path, header: str):
+    path = _attrs_file(tmp_path / "mds.xlsx", ["Objecttype", "Attribuut", header], [["Aansluitput", "diameter", "Ja"]])
+    spec = read_spec(path)
+    assert spec.flag(object_type="Aansluitput", attribute="diameter").minimal is True
+
+
+def test_missing_mds_column_gives_none(tmp_path: Path):
+    path = _attrs_file(
+        tmp_path / "old.xlsx", ["Objecttype", "Attribuut", "Opnemen"], [["Aansluitput", "geheim", "Nee"]],
+    )
+    spec = read_spec(path)
+    assert spec.flag(object_type="Aansluitput", attribute="geheim") == AttributeFlags(False, None)
+    assert spec.has_minimal_flags is False
+
+
+def test_duplicate_rows_with_trailing_space_keep_flags(tmp_path: Path):
+    path = _attrs_file(
+        tmp_path / "dup.xlsx",
+        ["Objecttype", "Attribuut", "Opnemen", "MinimaleDataset"],
+        [["Aansluitput", "diameter ", "Ja", "Ja"], ["Aansluitput", "diameter", "Ja", "Ja"]],
+    )
+    spec = read_spec(path)
+    assert spec.flag(object_type="Aansluitput", attribute="Diameter") == AttributeFlags(True, True)
+    assert spec.attributes["Aansluitput"] == ["diameter"]
+    assert spec.excluded.get("Aansluitput", set()) == set()
+
+
+def test_merge_flags_later_wins_and_logs(tmp_path: Path, caplog: pytest.LogCaptureFixture):
+    first = read_spec(_attrs_file(tmp_path / "a.xlsx", ["Objecttype", "Attribuut", "Opnemen"],
+                                  [["Aansluitput", "geheim", "Nee"]]))
+    second = read_spec(_attrs_file(tmp_path / "b.xlsx", ["Objecttype", "Attribuut", "Opnemen"],
+                                   [["Aansluitput", "geheim", "Ja"]]))
+    first.merge(second)
+    assert first.flag(object_type="Aansluitput", attribute="geheim") == AttributeFlags(True, None)
+    assert "geheim" not in first.excluded["Aansluitput"]
+    assert "Conflicting flags" in caplog.text
+    assert "b.xlsx" in caplog.text

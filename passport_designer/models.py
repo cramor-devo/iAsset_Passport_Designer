@@ -3,10 +3,13 @@ Data models (no Qt): specification, passport design and validation issues."""
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from enum import Enum
 
 from .profiles import DEFAULT_PROFILE, DesignProfile
+
+log = logging.getLogger(__name__)
 
 # Kolommen die standaard als filter dienen, in volgorde van voorkeur (Wave 1: Filter/Zoekfilter, Wave 2: Fase).
 # Columns used as filter by default, in order of preference (Wave 1: Filter/Zoekfilter, Wave 2: Fase).
@@ -48,6 +51,18 @@ class RawSheet:
     rows: list[tuple[object, ...]] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class AttributeFlags:
+    """Vlaggen van één attribuut uit het tabblad 'Attributen'; None = kolom of waarde ontbreekt.
+    Flags of one attribute from the 'Attributen' sheet; None = column or value missing.
+
+    include: Opnemen (Ja = True, Nee = False). minimal: MinimaleDataset (Ja = True, Nee = False).
+    """
+
+    include: bool | None = None
+    minimal: bool | None = None
+
+
 @dataclass
 class SpecModel:
     """Ingelezen specificatie: objecttypen en hun attributen. / Loaded specification: object types and attributes."""
@@ -58,6 +73,9 @@ class SpecModel:
     # Attributen die in de bron op "Nee" staan (In paspoort tonen / Opnemen), per objecttype, genormaliseerd.
     # Attributes marked "Nee" in the source (In paspoort tonen / Opnemen), per object type, normalised.
     excluded: dict[str, set[str]] = field(default_factory=dict)
+    # Vlaggen per objecttype en genormaliseerd attribuut (Opnemen en MinimaleDataset).
+    # Flags per object type and normalised attribute (Opnemen and MinimaleDataset).
+    flags: dict[str, dict[str, AttributeFlags]] = field(default_factory=dict)
     # Kopnamen van het tabblad 'Objecttypen' (zonder 'Objecttype') en de gekozen filterkolom ("" = 'Filter' of de
     # eerste beschikbare van Filter/Zoekfilter/Fase bij het inlezen).
     # Headers of the 'Objecttypen' sheet (without 'Objecttype') and the chosen filter column ("" = 'Filter' or the
@@ -81,6 +99,17 @@ class SpecModel:
                 members.append(object_type)
         return result
 
+    @property
+    def has_minimal_flags(self) -> bool:
+        """Heeft minstens één attribuut een MinimaleDataset-waarde? / Does any attribute have a MinimaleDataset value?
+        """
+        return any(f.minimal is not None for attrs in self.flags.values() for f in attrs.values())
+
+    def flag(self, *, object_type: str, attribute: str) -> AttributeFlags:
+        """Vlaggen van een attribuut, of lege vlaggen als het niet bekend is.
+        Flags of an attribute, or empty flags when it is unknown."""
+        return self.flags.get(object_type, {}).get(norm(attribute), AttributeFlags())
+
     def resolve_filter_column(self, preferred: str = "") -> str:
         """Kolomnaam (zoals in het bestand) die als filter dient: ``preferred`` als die bestaat, anders de eerste
         van Filter/Zoekfilter/Fase. / Column name (as in the file) used as filter: ``preferred`` when it exists,
@@ -93,7 +122,12 @@ class SpecModel:
 
     def merge(self, other: SpecModel) -> None:
         """Voeg een tweede specificatie toe (bijv. Wave 2 bovenop Wave 1); bestaande objecttypen blijven staan.
-        Add a second specification (e.g. Wave 2 on top of Wave 1); existing object types are kept."""
+        Vlaggen (Opnemen/MinimaleDataset): bij een verschil wint de latere bron en er wordt gelogd; een attribuut
+        dat daarna Opnemen=Ja heeft, verdwijnt uit ``excluded``. Dit is een bewuste wijziging t.o.v. de vereniging.
+        Add a second specification (e.g. Wave 2 on top of Wave 1); existing object types are kept.
+        Flags (Opnemen/MinimaleDataset): on a difference the later source wins and is logged; an attribute that then
+        has Opnemen=Ja is removed from ``excluded``. A deliberate change compared with the plain union.
+        """
         known = {(o.name, o.filter, o.values) for o in self.object_types}
         for object_type in other.object_types:
             if (object_type.name, object_type.filter, object_type.values) not in known:
@@ -106,6 +140,18 @@ class SpecModel:
             target.extend(a for a in attrs if norm(a) not in seen)
         for name, names in other.excluded.items():
             self.excluded.setdefault(name, set()).update(names)
+        for name, attrs in other.flags.items():
+            target_flags = self.flags.setdefault(name, {})
+            for key, new_flags in attrs.items():
+                old_flags = target_flags.get(key)
+                if old_flags is not None and old_flags != new_flags:
+                    log.warning(
+                        "Conflicting flags for %s / %s: %s (%s) overridden by %s (%s)",
+                        name, key, old_flags, ", ".join(self.sources), new_flags, ", ".join(other.sources),
+                    )
+                target_flags[key] = new_flags
+                if new_flags.include:
+                    self.excluded.get(name, set()).discard(key)
         self.sources.extend(s for s in other.sources if s not in self.sources)
         for key, sheets in other.raw_sheets.items():
             target_sheets = self.raw_sheets.setdefault(key, [])
