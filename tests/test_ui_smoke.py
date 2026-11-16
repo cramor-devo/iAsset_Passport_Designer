@@ -61,6 +61,19 @@ def test_window_title_contains_version(window):
     assert window.windowTitle() == f"iAsset Passport Designer v{__version__}"
 
 
+def test_file_menu_labels(window):
+    assert window.open_action.text() == "&Open Unafact specification(s)…"
+    assert window.add_action.text() == "&Add Unafact specification…"
+    assert window.ids_action.text() == "Load passport field &ID file…"
+    window._set_language("nl")
+    try:
+        assert window.open_action.text() == "Unafact-specificatie(s) &openen…"
+        assert window.add_action.text() == "Unafact-specificatie &toevoegen…"
+        assert window.ids_action.text() == "Paspoort-veld-&ID-bestand laden…"
+    finally:
+        window._set_language("en")
+
+
 def _themed_window(app, tmp_path, theme: str) -> MainWindow:
     settings = AppSettings(QSettings(str(tmp_path / f"{theme}.ini"), QSettings.Format.IniFormat))
     settings.set("ui/language", "en")

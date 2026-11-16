@@ -1,6 +1,9 @@
 # Changelog
 
 ## 0.5.0
+- Changed: clearer File-menu labels: *Open Unafact specification(s)…*, *Add Unafact specification…* and *Load passport
+  field ID file…* (Dutch: *Unafact-specificatie(s) openen…*, *Unafact-specificatie toevoegen…*, *Paspoort-veld-ID-bestand
+  laden…*). The shortcuts are unchanged.
 - Fixed: with Windows in dark mode, the light theme showed black tab headers. The chosen theme now sets the colours of
   the whole window (palette, Fusion style, tab headers, table headers, menu bar, status bar and scrollbars), so the
   dark and light themes look the same whatever Windows uses. Controls such as checkboxes and combo boxes now use the

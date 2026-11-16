@@ -56,7 +56,7 @@ Het logbestand staat in `%LOCALAPPDATA%\iAssetPassportDesigner\passport_designer
 
 ## Gebruik
 
-1. Kies **Bestand → Specificatie(s) openen…** en selecteer een of meer xlsx-bestanden. Met **Specificatie
+1. Kies **Bestand → Unafact-specificatie(s) openen…** en selecteer een of meer xlsx-bestanden. Met **Unafact-specificatie
    toevoegen…** voeg je een bestand toe aan wat al geladen is, bijvoorbeeld Wave 2 bovenop Wave 1. Elk bestand heeft
    een tabblad `Objecttypen` nodig (kolom Objecttype plus Filter, Zoekfilter of Fase; eventueel Groep) en een tabblad
    `Attributen` (kolommen Objecttype, Attribuut).
@@ -82,7 +82,7 @@ Het logbestand staat in `%LOCALAPPDATA%\iAssetPassportDesigner\passport_designer
    filter, dan toont het venster die verschillen en moet je het uitdrukkelijk bevestigen (Annuleren is de standaard).
    Een handmatige samenvoeging maak je net als andere samenvoegingen ongedaan; bij een ingelezen ontwerp is ze niet
    beschikbaar.
-5. Kies **Bestand → Veld-ID-bestand laden…** om een export van `GET /diverse-fields` te laden: de V2-paspoort-diverse-veldenlijst (bijv. `passport field list.csv`,
+5. Kies **Bestand → Paspoort-veld-ID-bestand laden…** om een export van `GET /diverse-fields` te laden: de V2-paspoort-diverse-veldenlijst (bijv. `passport field list.csv`,
    CSV met puntkomma `id;label;name;type;values;…`; JSON en xlsx met label/name en id werken ook). Elk paspoortveld
    krijgt de `id` van het diverse veld met dezelfde label. Het iAsset-veldencatalogus-xlsx uit de GUI (met de tabbladen
    `Paspoort velden` en `Thema Subthema`) werkt ook. Zonder veld-ID's krijgt `field_id` de waarde `null` en meldt het
@@ -129,7 +129,7 @@ Het logbestand staat in `%LOCALAPPDATA%\iAssetPassportDesigner\passport_designer
 
 | Actie | Sneltoets |
 |---|---|
-| Veld-ID-bestand laden… | Ctrl+I |
+| Paspoort-veld-ID-bestand laden… | Ctrl+I |
 | Veld-ID's controleren… | Ctrl+Shift+D |
 | Bijgewerkt Excel-ontwerp importeren… | Ctrl+Shift+I |
 | Annotaties controleren/repareren… | Ctrl+Shift+A |

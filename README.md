@@ -55,7 +55,7 @@ The log file is stored at `%LOCALAPPDATA%\iAssetPassportDesigner\passport_design
 
 ## Usage
 
-1. Choose **File → Open specification(s)…** and select one or more xlsx files. Use **Add specification…** to add
+1. Choose **File → Open Unafact specification(s)…** and select one or more xlsx files. Use **Add Unafact specification…** to add
    another file to what is already loaded, for example Wave 2 on top of Wave 1. Each file needs an `Objecttypen` sheet
    (column Objecttype plus Filter, Zoekfilter or Fase; optionally Groep) and an `Attributen` sheet (columns
    Objecttype, Attribuut).
@@ -78,7 +78,7 @@ The log file is stored at `%LOCALAPPDATA%\iAssetPassportDesigner\passport_design
    characters, unique). If the passports differ in management group or filter, the dialog lists the differences and you
    must confirm explicitly (Cancel is the default). A manual merge can be undone like any other merge and is not
    available while an imported design is shown.
-5. Choose **File → Load field ID file…** to load the V2 passport diverse-fields list (e.g. `passport field list.csv`, semicolon CSV with
+5. Choose **File → Load passport field ID file…** to load the V2 passport diverse-fields list (e.g. `passport field list.csv`, semicolon CSV with
    `id;label;name;type;values;…`; JSON and xlsx with label/name and id also work). Each passport field gets the `id`
    of the diverse field with the same label. The iAsset GUI field catalog (xlsx with the sheets `Paspoort velden` and
    `Thema Subthema`) is accepted as well. Without field IDs, `field_id` is set to `null` and the **Validation** tab
@@ -122,7 +122,7 @@ The log file is stored at `%LOCALAPPDATA%\iAssetPassportDesigner\passport_design
 
 | Action | Shortcut |
 |---|---|
-| Load field ID file… | Ctrl+I |
+| Load passport field ID file… | Ctrl+I |
 | Check field IDs… | Ctrl+Shift+D |
 | Import refined Excel… | Ctrl+Shift+I |
 | Check/fix annotations… | Ctrl+Shift+A |
