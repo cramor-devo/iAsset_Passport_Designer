@@ -69,7 +69,7 @@ from .merge_dialog import MergeDialog
 from .mockup import PassportMockup
 from .settings_dialog import PayloadSettingsDialog
 from .sheet_preview import SheetPreview
-from .theme import PALETTES, app_stylesheet
+from .theme import PALETTES, app_stylesheet, qt_palette
 from .workers import Job, run_job
 
 log = logging.getLogger(__name__)
@@ -414,9 +414,16 @@ class MainWindow(QMainWindow):
     # --- thema en taal / theme and language ------------------------------------------------------------------
 
     def _apply_theme(self) -> None:
+        """Het gekozen thema wint van de Windows-modus: palet, kleurenschema en stijlblad. / The chosen theme wins
+        over the Windows mode: palette, colour scheme and stylesheet."""
         app = QApplication.instance()
         if isinstance(app, QApplication):
-            app.setStyleSheet(app_stylesheet(PALETTES[self.theme_name]))
+            palette = PALETTES[self.theme_name]
+            hints = app.styleHints()
+            if hints is not None and hasattr(hints, "setColorScheme"):  # Qt 6.8 en later / Qt 6.8 and later
+                hints.setColorScheme(Qt.ColorScheme.Light if palette.name == "light" else Qt.ColorScheme.Dark)
+            app.setPalette(qt_palette(palette))
+            app.setStyleSheet(app_stylesheet(palette))
 
     def _set_theme(self, name: str) -> None:
         self.theme_name = name

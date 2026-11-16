@@ -10,13 +10,14 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from conftest import make_spec  # noqa: E402
 from PyQt6.QtCore import QSettings  # noqa: E402
+from PyQt6.QtGui import QColor, QPalette  # noqa: E402
 from PyQt6.QtWidgets import QApplication  # noqa: E402
 
 from passport_designer import __version__  # noqa: E402
 from passport_designer.i18n import TRANSLATIONS, translator  # noqa: E402
 from passport_designer.settings import AppSettings  # noqa: E402
 from passport_designer.ui.main_window import MainWindow  # noqa: E402
-from passport_designer.ui.theme import DARK, LIGHT  # noqa: E402
+from passport_designer.ui.theme import DARK, LIGHT, app_stylesheet, qt_palette  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -58,6 +59,56 @@ def test_language_switch_changes_texts(window):
 
 def test_window_title_contains_version(window):
     assert window.windowTitle() == f"iAsset Passport Designer v{__version__}"
+
+
+def _themed_window(app, tmp_path, theme: str) -> MainWindow:
+    settings = AppSettings(QSettings(str(tmp_path / f"{theme}.ini"), QSettings.Format.IniFormat))
+    settings.set("ui/language", "en")
+    settings.set("ui/theme", theme)
+    win = MainWindow(settings)
+    win.show()
+    QApplication.processEvents()
+    return win
+
+
+def _unselected_tab_luminance(win: MainWindow) -> float:
+    bar = win.views.tabBar()
+    assert bar is not None
+    index = 1 if win.views.currentIndex() == 0 else 0  # een niet-geselecteerde tab / an unselected tab
+    colour = bar.grab().toImage().pixelColor(bar.tabRect(index).center())
+    return 0.2126 * colour.redF() + 0.7152 * colour.greenF() + 0.0722 * colour.blueF()
+
+
+def test_light_theme_tabs_light_under_dark_system(app, tmp_path):
+    dark_system = QPalette()
+    dark_system.setColor(QPalette.ColorRole.Window, QColor("#202020"))
+    app.setPalette(dark_system)  # Windows in donkermodus / Windows in dark mode
+    win = _themed_window(app, tmp_path, "light")
+    try:
+        assert _unselected_tab_luminance(win) > 0.7
+    finally:
+        win.close()
+
+
+def test_dark_theme_tabs_dark(app, tmp_path):
+    win = _themed_window(app, tmp_path, "dark")
+    try:
+        assert _unselected_tab_luminance(win) < 0.35
+    finally:
+        win.close()
+
+
+def test_app_stylesheet_has_tab_background():
+    for palette in (DARK, LIGHT):
+        css = app_stylesheet(palette)
+        assert "QTabBar::tab {" in css and f"background: {palette.frame}" in css
+        assert f"color: {palette.text}" in css
+
+
+def test_qt_palette_uses_theme_colours():
+    palette = qt_palette(LIGHT)
+    assert palette.color(QPalette.ColorRole.Window).name() == LIGHT.window
+    assert palette.color(QPalette.ColorRole.Base).name() == LIGHT.panel_bg
 
 
 def test_merge_suggestions_apply_and_reset_in_ui(window):

@@ -16,6 +16,9 @@ def main() -> int:
     setup_logging()
     set_windows_app_id()
     app = QApplication(sys.argv)
+    # NL: Fusion volgt de palet en stijlbladen volledig; de Windows-stijl negeert delen ervan. / EN: Fusion honours
+    # the palette and stylesheets fully; the native Windows style ignores parts of them.
+    app.setStyle("Fusion")
     app.setApplicationName(APP_NAME)
     configure_application_icon(app)
     window = MainWindow()
