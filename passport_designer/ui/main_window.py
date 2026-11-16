@@ -592,6 +592,7 @@ class MainWindow(QMainWindow):
     def _on_loaded(self, loaded: SpecModel, file_count: int, replace: bool) -> None:
         self._busy = False
         if replace or self.spec is None:
+            self._flush_layouts()
             self.spec = loaded
             self.applied_merges.clear()
             self._reset_overrides()
@@ -835,6 +836,7 @@ class MainWindow(QMainWindow):
         self.imported_sheets = [ImportedSheet(sheet, diffs.get(sheet.name)) for sheet in refined.sheets]
         self.tabs = [entry.sheet.tab for entry in self.imported_sheets]
         self._preview = None
+        self._flush_layouts()
         self._reset_overrides()
         for entry in self.imported_sheets:
             restored = self._imported_override(entry.sheet)
@@ -864,6 +866,7 @@ class MainWindow(QMainWindow):
         """Terug naar het uit de specificatie gegenereerde ontwerp. / Back to the design generated from the spec."""
         if self.imported is None:
             return
+        self._flush_layouts()
         self._clear_import()
         self._reset_overrides()
         if self.spec is not None:
