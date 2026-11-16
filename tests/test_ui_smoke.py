@@ -659,3 +659,132 @@ def test_minimal_dataset_png_differs_on_and_off(window, tmp_path, monkeypatch):
         window.export_png()
         images.append(QImage(str(target)))
     assert images[0] != images[1]
+
+
+# --- plan 0.5.0-10: controleren met klant / verify with customer ---------------------------------------------------
+
+
+def _shown(window, prefix: str):
+    item = _sheet_item(window, prefix)
+    assert item is not None
+    return item
+
+
+def _select(window, prefix: str):
+    window.sheet_preview.clearSelection()
+    item = _sheet_item(window, prefix)
+    assert item is not None
+    item.setSelected(True)
+    return item
+
+
+def _verify_window(window):
+    window.filter_list.setCurrentRow(0)
+    window.views.setCurrentWidget(window.sheet_preview)
+    window._refresh_views()
+    return window
+
+
+def test_mark_action_turns_selected_field_red_and_toggles_off(window):
+    _verify_window(window)
+    _select(window, "breedte")
+    window.mark_action.trigger()
+    item = _shown(window, "breedte")
+    assert item.foreground().color().name() == "#c00000"
+    assert 'Verify with customer' in item.toolTip()
+    _select(window, "breedte")
+    window.mark_action.trigger()
+    assert _shown(window, "breedte").foreground().color().name() != "#c00000"
+
+
+def test_verify_marks_toggle_hides_red_and_png_differs(window, tmp_path, monkeypatch):
+    from PyQt6.QtGui import QImage
+    from PyQt6.QtWidgets import QFileDialog
+
+    _verify_window(window)
+    _select(window, "breedte")
+    window.mark_action.trigger()
+    images = []
+    for shown in (True, False):
+        window.verify_marks_action.setChecked(shown)
+        window.verify_marks_action.trigger()  # wissel / toggle
+        window.verify_marks_action.setChecked(shown)
+        window._on_verify_marks_toggled()
+        target = tmp_path / f"{shown}.png"
+        monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *a, t=target, **k: (str(t), "")))
+        window.export_png()
+        images.append(QImage(str(target)))
+    assert images[0] != images[1]
+    assert _shown(window, "breedte").foreground().color().name() != "#c00000"
+
+
+def test_marked_field_stays_in_payload_until_deleted(window):
+    _verify_window(window)
+    before = window.payload.field_count
+    _select(window, "breedte")
+    window.mark_action.trigger()
+    assert window.payload.field_count == before
+    _select(window, "breedte")
+    window.delete_action.trigger()
+    assert window.payload.field_count == before - 1
+    assert _sheet_item(window, "breedte") is None
+
+
+def test_delete_all_marked_asks_first_and_cancel_keeps_fields(window, monkeypatch):
+    from PyQt6.QtWidgets import QMessageBox
+
+    _verify_window(window)
+    _select(window, "breedte")
+    window.mark_action.trigger()
+    asked: list[str] = []
+
+    def answer(button):
+        def fake(_parent, _title, text, *_a):
+            asked.append(text)
+            return button
+        return staticmethod(fake)
+
+    monkeypatch.setattr(QMessageBox, "question", answer(QMessageBox.StandardButton.Cancel))
+    window.delete_marked_action.trigger()
+    assert asked and asked[0].startswith("Delete 1 marked fields from passport")
+    assert _sheet_item(window, "breedte") is not None
+    monkeypatch.setattr(QMessageBox, "question", answer(QMessageBox.StandardButton.Yes))
+    window.delete_marked_action.trigger()
+    assert _sheet_item(window, "breedte") is None
+    assert window.validation_list.count() and "Deleted by user" in window.validation_list.item(
+        window.validation_list.count() - 1).text()
+
+
+def test_undo_restores_deleted_field_and_restore_dialog_lists_it(window, monkeypatch):
+    from PyQt6.QtWidgets import QDialog
+
+    from passport_designer.ui.restore_dialog import RestoreDialog
+
+    _verify_window(window)
+    _select(window, "breedte")
+    window.delete_action.trigger()
+    assert window.undo_action.isEnabled()
+    window.undo_action.trigger()
+    assert _sheet_item(window, "breedte") is not None
+    _select(window, "breedte")
+    window.delete_action.trigger()
+    seen: list[list[str]] = []
+
+    def fake_exec(self):
+        seen.append([self.list.item(i).text() for i in range(self.list.count())])
+        self.list.item(0).setCheckState(Qt.CheckState.Checked)
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(RestoreDialog, "exec", fake_exec)
+    window.restore_action.trigger()
+    assert seen and seen[0][0].lower().startswith("breedte")
+    assert _sheet_item(window, "breedte") is not None
+
+
+def test_sheet_preview_context_menu_emits_signals(window):
+    _verify_window(window)
+    got: list[list[str]] = []
+    window.sheet_preview.verify_toggled.connect(got.append)
+    menu = window.sheet_preview.context_menu(["breedte"])
+    menu.actions()[0].trigger()
+    assert got == [["breedte"]]

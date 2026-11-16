@@ -78,6 +78,14 @@ The log file is stored at `%LOCALAPPDATA%\iAssetPassportDesigner\passport_design
    it is for one type only, and **stripes** of those types' colours for several types. A legend (the object-type names in
    their colours plus *All types* in green) appears under the header, and the tooltip names the types. The shades and
    legend are also written to the PNG and the Excel exports while the toggle is on.
+   **Fields to verify with the customer:** in the Design sheet tab, select fields and choose **Edit → Mark: verify with
+   customer** (**Ctrl+Shift+V**, also in the right-click menu). They turn red in the views, the PNG and the Excel exports
+   (tooltip *Verify with customer*) and stay in the payload. **Edit → Delete field** (**Del**), **Delete all fields
+   marked for verification** (asks first) and **Restore deleted fields…** remove or bring back fields; **Ctrl+Z**
+   undoes the last change. Deleted fields leave the payload, the views and the exports and are listed on the Validation
+   tab; fields in repeatable sections cannot be deleted. **View → Show "verify with customer" marks** hides the red
+   colour. Importing a refined Excel recognises red text and the green fill `92D050` as marks. Marks and deletions are
+   not remembered between sessions yet.
 4. The **Merge suggestions** tab proposes filters that could share a single passport, based on the same management
    group and similar attributes (Jaccard similarity). Fields that do not apply to every object type get a footnote:
    these are the fields you switch on or off per sub-theme in iAsset. Use **Preview merged passport** to inspect a
@@ -142,6 +150,8 @@ The log file is stored at `%LOCALAPPDATA%\iAssetPassportDesigner\passport_design
 | Export mockup as PNG… | Ctrl+P |
 | Only fields with Opnemen = "Ja" (View menu) | Ctrl+Alt+O |
 | Highlight minimal dataset (View menu) | Ctrl+Shift+M |
+| Mark: verify with customer (Edit menu) | Ctrl+Shift+V |
+| Delete field / Undo field change (Edit menu) | Del / Ctrl+Z |
 
 ## Design profiles
 

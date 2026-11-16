@@ -34,6 +34,7 @@ DEFAULT_WIDTH = 8.43
 # Alleen gebruikt voor bestanden zonder metadata. / Only used for files without metadata.
 SKIPPED_SHEETS = {norm(name) for name in (METADATA_SHEET, *REFERENCE_SHEETS.values())}
 Position = tuple[int, int]
+VERIFY_FILL = "92D050"  # groene vulling = controleren met klant / green fill = verify with customer
 
 
 @dataclass
@@ -62,6 +63,11 @@ class RefinedSheet:
     meta_key: str | None = None  # sleutel in metadata['sheets'] (kan afwijken van de bladnaam) / key in metadata
     metadata: dict[str, Any] | None = None  # blokje van dit blad uit '_designer' / this sheet's '_designer' entry
     warnings: list[str] = field(default_factory=list)
+    # Genormaliseerde veldnamen met rode letters of groene vulling (controleren met klant) en door de gebruiker
+    # verwijderde velden uit '_designer'. / Normalised field names with red text or green fill (verify with customer)
+    # and user-deleted fields from '_designer'.
+    verify: set[str] = field(default_factory=set)
+    deleted: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -152,6 +158,24 @@ def _metadata(workbook: Any) -> dict[str, Any] | None:
 def _rgb(cell: Any) -> str:
     colour = cell.fill.fgColor.rgb if cell.fill is not None and cell.fill.fill_type == "solid" else ""
     return colour.upper() if isinstance(colour, str) else ""
+
+
+def _is_red(rgb: object) -> bool:
+    """Rood: R >= 0xC0 en G, B <= 0x40 (ARGB of RGB). / Red: R >= 0xC0 and G, B <= 0x40 (ARGB or RGB)."""
+    if not isinstance(rgb, str) or len(rgb) < 6:
+        return False
+    try:
+        red, green, blue = (int(rgb[-6:][i:i + 2], 16) for i in (0, 2, 4))
+    except ValueError:
+        return False
+    return red >= 0xC0 and green <= 0x40 and blue <= 0x40
+
+
+def _is_verify_cell(cell: Any) -> bool:
+    """Rode letters of groene vulling ``92D050`` = controleren met klant. / Red text or green fill ``92D050`` = verify
+    with customer."""
+    colour = cell.font.color.rgb if cell.font is not None and cell.font.color is not None else None
+    return _is_red(colour) or _rgb(cell).endswith(VERIFY_FILL)
 
 
 def _is_filled(cell: Any) -> bool:
@@ -340,6 +364,8 @@ def _read_sheet(
             if not label.strip("*"):
                 continue
             row_cells.append(Cell(label, footnote, annotation=annotation))
+            if _is_verify_cell(sheet.cell(row=row, column=column)):
+                result.verify.add(norm(label))
             result.positions[(section_index, row_index, len(row_cells) - 1)] = (row, column)
             result.label_positions.setdefault(norm(label.rstrip("*").strip()), (row, column))
             used_columns = max(used_columns, column)
@@ -386,6 +412,8 @@ def _finish(result: RefinedSheet, sheet: Worksheet, used_columns: int, margin: i
     if margin:
         result.margin_width = _widths(sheet, margin)[-1]
     sheet_meta = result.metadata or {}
+    result.verify |= {norm(str(v)) for v in sheet_meta.get("verify", [])}
+    result.deleted = [str(v) for v in sheet_meta.get("deleted", [])]
     for number, names in sheet_meta.get("footnotes", {}).items():
         tab.footnotes.setdefault(number, list(names))
     tab.footnotes = dict(sorted(tab.footnotes.items()))

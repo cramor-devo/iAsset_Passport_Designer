@@ -111,3 +111,21 @@ def test_no_fill_or_legend_when_off(tmp_path, wave1_spec):
     assert not any(c.value == "All types" for c in layout.cells)
     meta = load_workbook(export_workbook([tab], tmp_path / "o.xlsx"))["_designer"]
     assert {r[0].value: r[1].value for r in meta.iter_rows(min_row=2)}["minimal_dataset_shown"] == "false"
+
+
+def test_marks_and_deleted_roundtrip_through_designer_sheet(tmp_path, wave1_spec):
+    import openpyxl
+
+    from passport_designer.excel_export import VERIFY_COLOUR, export_workbook
+    from passport_designer.refined_import import read_metadata
+
+    tab = _bord_tab(wave1_spec)
+    label = next(c.label for s in tab.sections for r in s.rows for c in r)
+    path = tmp_path / "v.xlsx"
+    export_workbook([tab], path, verify_by_tab={tab.name: {norm(label)}}, deleted_by_tab={tab.name: {"gone"}})
+    sheet = openpyxl.load_workbook(path)[tab.name]
+    reds = [c for row in sheet.iter_rows() for c in row if c.font.color is not None
+            and str(c.font.color.rgb).endswith(VERIFY_COLOUR)]
+    assert reds and str(reds[0].value).startswith(label)
+    info = (read_metadata(path) or {})["sheets"][tab.name]
+    assert info["verify"] == [norm(label)] and info["deleted"] == ["gone"]

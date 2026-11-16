@@ -80,6 +80,15 @@ Het logbestand staat in `%LOCALAPPDATA%\iAssetPassportDesigner\passport_designer
    dat objecttype** als het maar voor één type geldt, en **strepen** in de kleuren van die typen bij meerdere typen.
    Onder de kop staat een legenda (de objecttypenamen in hun kleur plus *Alle typen* in groen) en de tooltip noemt de
    typen. Zolang de schakelaar aan staat, komen de kleuren en de legenda ook in de PNG en de Excel-exports.
+   **Velden met de klant controleren:** selecteer in het tabblad Ontwerpblad velden en kies **Bewerken → Markeren:
+   controleren met klant** (**Ctrl+Shift+V**, ook in het rechtermuismenu). Ze worden rood in de weergaven, de PNG en de
+   Excel-exports (tooltip *Controleren met klant*) en blijven in de payload. **Bewerken → Veld verwijderen** (**Del**),
+   **Alle te controleren velden verwijderen** (vraagt eerst bevestiging) en **Verwijderde velden herstellen…**
+   verwijderen of herstellen velden; **Ctrl+Z** maakt de laatste wijziging ongedaan. Verwijderde velden verdwijnen uit
+   de payload, de weergaven en de exports en staan op het tabblad Validatie; velden in herhaalbare secties kunnen niet
+   verwijderd worden. **Beeld → "Controleren met klant" tonen** verbergt de rode kleur. Bij het importeren van een
+   verfijnd Excel-bestand gelden rode letters en de groene vulling `92D050` als markering. Markeringen en
+   verwijderingen worden nog niet tussen sessies onthouden.
 4. Het tabblad **Samenvoegadvies** stelt filters voor die samen één paspoort kunnen gebruiken. Het advies is gebaseerd
    op dezelfde beheergroep en vergelijkbare attributen (Jaccard-gelijkenis). Velden die niet voor alle objecttypen
    gelden, krijgen een voetnoot: dit zijn de velden die je in iAsset per subthema aan- of uitzet. Met **Voorbeeld
@@ -149,6 +158,8 @@ Het logbestand staat in `%LOCALAPPDATA%\iAssetPassportDesigner\passport_designer
 | Mockup als PNG exporteren… | Ctrl+P |
 | Alleen velden met Opnemen = "Ja" (menu Beeld) | Ctrl+Alt+O |
 | Minimale dataset markeren (menu Beeld) | Ctrl+Shift+M |
+| Markeren: controleren met klant (menu Bewerken) | Ctrl+Shift+V |
+| Veld verwijderen / Veldwijziging ongedaan maken (menu Bewerken) | Del / Ctrl+Z |
 
 ## Ontwerpprofielen
 

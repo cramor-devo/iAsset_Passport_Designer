@@ -48,8 +48,17 @@ from ..field_map import FieldIdMap, FieldMapError
 from ..i18n import LANGUAGES, tr, translator
 from ..id_check import check_ids
 from ..layout_engine import LayoutEngine, LayoutOptions
+from ..layout_overrides import (
+    TabOverride,
+    apply_override,
+    deletable_labels,
+    delete_fields,
+    restore_fields,
+    tab_labels,
+    toggle_verify,
+)
 from ..merge_advisor import DEFAULT_THRESHOLD, MergeSuggestion, apply_merges, manual_merge_info, suggest_merges
-from ..models import PassportTab, Severity, SpecModel
+from ..models import PassportTab, Severity, SpecModel, norm
 from ..payload import (
     ENDPOINT,
     PayloadOptions,
@@ -68,6 +77,7 @@ from .crossref_panel import CrossRefPanel
 from .id_check_dialog import IdCheckDialog
 from .merge_dialog import MergeDialog
 from .mockup import PassportMockup
+from .restore_dialog import RestoreDialog
 from .settings_dialog import PayloadSettingsDialog
 from .sheet_preview import SheetPreview
 from .theme import PALETTES, app_stylesheet, qt_palette
@@ -120,6 +130,10 @@ class MainWindow(QMainWindow):
         self.applied_merges: list[tuple[str, list[str]]] = []
         self._preview: PassportTab | None = None
         self.imported: RefinedWorkbook | None = None
+        # Handmatige markeringen en verwijderingen per paspoortnaam, plus een stapel om ongedaan te maken.
+        # Manual marks and deletions per passport name, plus a stack for undo.
+        self.overrides: dict[str, TabOverride] = {}
+        self._undo_stack: list[dict[str, TabOverride]] = []
         self.imported_sheets: list[ImportedSheet] = []
         self._busy = False
         self._actions: list[QAction] = []
@@ -293,6 +307,7 @@ class MainWindow(QMainWindow):
         assert bar is not None
         self.file_menu = bar.addMenu("") or QMenu()
         self.view_menu = bar.addMenu("") or QMenu()
+        self.edit_menu = bar.addMenu("") or QMenu()
         self.settings_menu = bar.addMenu("") or QMenu()
         self.help_menu = bar.addMenu("") or QMenu()
         self.open_action = self._action("action.open", self.open_specs, QKeySequence.StandardKey.Open)
@@ -341,6 +356,10 @@ class MainWindow(QMainWindow):
         self.minimal_action.setCheckable(True)
         self.minimal_action.setChecked(self.settings.boolean("view/minimal_dataset", False))
         self.view_menu.addAction(self.minimal_action)
+        self.verify_marks_action = self._action("action.verify_marks", self._on_verify_marks_toggled)
+        self.verify_marks_action.setCheckable(True)
+        self.verify_marks_action.setChecked(self.settings.boolean("view/verify_marks", True))
+        self.view_menu.addAction(self.verify_marks_action)
         self.view_menu.addSeparator()
         self.theme_menu = self.view_menu.addMenu("") or QMenu()
         self.language_menu = self.view_menu.addMenu("") or QMenu()
@@ -364,6 +383,17 @@ class MainWindow(QMainWindow):
             language_group.addAction(action)
             self.language_menu.addAction(action)
             self._language_actions[code] = action
+
+        self.mark_action = self._action("verify.mark", self.mark_verify_selected, "Ctrl+Shift+V")
+        self.delete_action = self._action("verify.delete", self.delete_selected, "Del")
+        self.delete_marked_action = self._action("verify.delete_marked", self.delete_all_marked)
+        self.restore_action = self._action("verify.restore", self.restore_dialog)
+        self.undo_action = self._action("verify.undo", self.undo_override, QKeySequence.StandardKey.Undo)
+        self.undo_action.setEnabled(False)
+        for action in (self.mark_action, self.delete_action, self.delete_marked_action, self.restore_action):
+            self.edit_menu.addAction(action)
+        self.edit_menu.addSeparator()
+        self.edit_menu.addAction(self.undo_action)
 
         self.payload_settings_action = self._action("action.payload_settings", self.edit_payload_settings)
         self.settings_menu.addAction(self.payload_settings_action)
@@ -390,6 +420,7 @@ class MainWindow(QMainWindow):
         self.crossref_panel.retranslate()
         self.file_menu.setTitle(tr("menu.file"))
         self.view_menu.setTitle(tr("menu.view"))
+        self.edit_menu.setTitle(tr("menu.edit"))
         self.settings_menu.setTitle(tr("menu.settings"))
         self.help_menu.setTitle(tr("menu.help"))
         self.theme_menu.setTitle(tr("menu.theme"))
@@ -508,6 +539,7 @@ class MainWindow(QMainWindow):
         if replace or self.spec is None:
             self.spec = loaded
             self.applied_merges.clear()
+            self._reset_overrides()
         else:
             self.spec.merge(loaded)
         self.spec.filter_column = self.spec.resolve_filter_column(
@@ -746,6 +778,10 @@ class MainWindow(QMainWindow):
         self.imported_sheets = [ImportedSheet(sheet, diffs.get(sheet.name)) for sheet in refined.sheets]
         self.tabs = [entry.sheet.tab for entry in self.imported_sheets]
         self._preview = None
+        self._reset_overrides()
+        for entry in self.imported_sheets:
+            if entry.sheet.verify or entry.sheet.deleted:
+                self.overrides[entry.sheet.tab.name] = TabOverride(verify=frozenset(entry.sheet.verify))
         self.back_action.setEnabled(True)
         self._update_merge_state()
         self._fill_filter_list()
@@ -771,6 +807,7 @@ class MainWindow(QMainWindow):
         if self.imported is None:
             return
         self._clear_import()
+        self._reset_overrides()
         if self.spec is not None:
             self._rebuild_designs()
         else:
@@ -963,6 +1000,107 @@ class MainWindow(QMainWindow):
             widget.setEnabled(available)
             widget.setToolTip(tip)
 
+    # --- markeren en verwijderen / marking and deleting -----------------------------------------------------
+
+    def _effective(self, tab: PassportTab | None) -> tuple[PassportTab | None, set[str]]:
+        """Het paspoort zonder verwijderde velden en de gemarkeerde veldnamen. / The passport without deleted fields
+        and the marked field names."""
+        if tab is None:
+            return None, set()
+        return apply_override(tab, self.overrides.get(tab.name, TabOverride()))
+
+    def _reset_overrides(self) -> None:
+        self.overrides.clear()
+        self._undo_stack.clear()
+
+    def _change_override(self, change: Callable[[TabOverride], TabOverride]) -> None:
+        """Pas het huidige paspoort aan, met een momentopname voor ongedaan maken. / Change the current passport, with
+        a snapshot for undo."""
+        tab = self.current_tab()
+        if tab is None:
+            return
+        current = self.overrides.get(tab.name, TabOverride())
+        updated = change(current)
+        if updated == current:
+            return
+        self._undo_stack.append(dict(self.overrides))
+        del self._undo_stack[:-50]
+        if updated.is_empty:
+            self.overrides.pop(tab.name, None)
+        else:
+            self.overrides[tab.name] = updated
+        self._refresh_views()
+
+    def undo_override(self) -> None:
+        if not self._undo_stack:
+            return
+        self.overrides = self._undo_stack.pop()
+        self._refresh_views()
+
+    def _selected_labels(self) -> list[str]:
+        return self.sheet_preview.selected_labels()
+
+    def mark_verify_selected(self) -> None:
+        self._mark_labels(self._selected_labels())
+
+    def delete_selected(self) -> None:
+        self._delete_labels(self._selected_labels())
+
+    def _mark_labels(self, labels: list[str]) -> None:
+        self._change_override(lambda o: toggle_verify(o, labels=labels))
+
+    def _delete_labels(self, labels: list[str]) -> None:
+        tab = self.current_tab()
+        if tab is None or not labels:
+            return
+        allowed = deletable_labels(tab, labels)
+        refused = [name for key, name in tab_labels(tab).items() if key in {norm(name) for name in labels} - allowed]
+        if refused:
+            self.statusBar().showMessage(tr("verify.protected", fields=", ".join(refused)))
+        if allowed:
+            self._change_override(lambda o: delete_fields(o, labels=allowed))
+
+    def delete_all_marked(self) -> None:
+        tab = self.current_tab()
+        if tab is None:
+            return
+        override = self.overrides.get(tab.name, TabOverride())
+        present = deletable_labels(tab, override.verify & set(tab_labels(tab)))
+        if not present:
+            self.statusBar().showMessage(tr("verify.none_marked"))
+            return
+        answer = QMessageBox.question(
+            self, tr("app.title"), tr("verify.confirm", count=len(present), tab=tab.name),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel, QMessageBox.StandardButton.Cancel,
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            self._change_override(lambda o: delete_fields(o, labels=present))
+
+    def restore_dialog(self) -> None:
+        tab = self.current_tab()
+        if tab is None:
+            return
+        deleted = self.overrides.get(tab.name, TabOverride()).deleted
+        if not deleted:
+            self.statusBar().showMessage(tr("verify.nothing_deleted"))
+            return
+        names = tab_labels(tab)
+        dialog = RestoreDialog({key: names.get(key, key) for key in sorted(deleted)}, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted and dialog.chosen():
+            self._change_override(lambda o: restore_fields(o, labels=dialog.chosen()))
+
+    def _on_verify_marks_toggled(self) -> None:
+        self.settings.set("view/verify_marks", self.verify_marks_action.isChecked())
+        self._refresh_views()
+
+    def _export_overrides(self) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
+        """Gemarkeerde en verwijderde velden per paspoortnaam voor de export. / Marked and deleted fields per passport
+        name for the export."""
+        show = self.verify_marks_action.isChecked()
+        verify = {t.name: (self._effective(t)[1] if show else set()) for t in self.tabs}
+        deleted = {t.name: set(o.deleted) for t in self.tabs if (o := self.overrides.get(t.name))}
+        return verify, deleted
+
     def _muted_labels(self, tab: PassportTab | None) -> set[str]:
         """Genormaliseerde veldnamen met Opnemen = Nee die grijs getoond worden (alleen in de modus 'alle velden').
         Normalised field names with Opnemen = Nee to show grey (only in the 'all fields' mode)."""
@@ -1032,7 +1170,7 @@ class MainWindow(QMainWindow):
     def preview_tab(self) -> PassportTab | None:
         """Het getoonde paspoort: voor één objecttype zonder de velden die daar niet voor gelden.
         The passport shown: for one object type without the fields that do not apply to it."""
-        tab = self.current_tab()
+        tab = self._effective(self.current_tab())[0]
         object_type = self.selected_object_type()
         if tab is None or not object_type or self.engine is None or self.imported is not None:
             return tab
@@ -1205,19 +1343,23 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(tr("status.saved", path=path))
 
     def _refresh_views(self) -> None:
-        tab = self.current_tab()
+        base = self.current_tab()
+        tab, verify_all = self._effective(base)
         shown = self.preview_tab()
-        entry = self._imported_entry(tab)
+        verify = verify_all if self.verify_marks_action.isChecked() else set()
+        entry = self._imported_entry(base)
+        deleted = bool(base is not None and self.overrides.get(base.name, TabOverride()).deleted)
         muted = self._muted_labels(shown)
         self._update_minimal_state()
+        self.undo_action.setEnabled(bool(self._undo_stack))
         marks, legend = self._minimal_info(shown, self.selected_object_type())
         self.mockup.show_tab(
             shown, self.selected_object_type(), PALETTES[self.theme_name],
-            entry.sheet.column_widths if entry else None, self.current_highlights(tab),
-            entry.sheet.positions if entry else None,
-            muted=muted, minimal=marks, legend=legend,
+            entry.sheet.column_widths if entry and not deleted else None, self.current_highlights(base),
+            entry.sheet.positions if entry and not deleted else None,
+            muted=muted, minimal=marks, legend=legend, verify=verify,
         )
-        self.sheet_preview.show_tab(shown, muted=muted, minimal=marks, legend=legend)
+        self.sheet_preview.show_tab(shown, muted=muted, minimal=marks, legend=legend, verify=verify)
         self.payload = build_tab_payload(tab, self.ids, self.options) if tab else None
         self._render_payload_text()
         self.validation_list.clear()
@@ -1230,6 +1372,11 @@ class MainWindow(QMainWindow):
         for issue in self.payload.issues:
             severity = tr(f"sev.{issue.severity.value}")
             self.validation_list.addItem(f"{SEVERITY_MARK[issue.severity]} {severity}: {issue.message}")
+        if base is not None:
+            names = tab_labels(base)
+            for key in sorted(self.overrides.get(base.name, TabOverride()).deleted):
+                message = tr("verify.deleted_info", field=names.get(key, key))
+                self.validation_list.addItem(f"{SEVERITY_MARK[Severity.INFO]} {tr('sev.info')}: {message}")
 
     def payload_string(self, payload: TabPayload | None = None, fmt: int | None = None) -> str:
         data = payload or self.payload
@@ -1281,9 +1428,13 @@ class MainWindow(QMainWindow):
         if not path:
             return
         try:
+            verify, deleted = self._export_overrides()
             export_workbook(
-                self.tabs, path, spec=self.spec, only_included=self.only_included_check.isChecked(),
-                minimal_by_tab={t.name: self._minimal_info(t) for t in self.tabs} if self._minimal_on() else None,
+                [self._effective(t)[0] or t for t in self.tabs], path, spec=self.spec,
+                only_included=self.only_included_check.isChecked(),
+                minimal_by_tab={t.name: self._minimal_info(self._effective(t)[0] or t) for t in self.tabs}
+                if self._minimal_on() else None,
+                verify_by_tab=verify, deleted_by_tab=deleted,
             )
         except (OSError, ValueError) as exc:
             log.exception("Excel export failed")
@@ -1303,7 +1454,17 @@ class MainWindow(QMainWindow):
         if not path:
             return
         engine = self.engine
-        pairs = [(engine.build_single(tab, o.name), o.name) for tab in self.tabs for o in tab.object_types]
+        verify, deleted = self._export_overrides()
+        pairs: list[tuple[PassportTab, str]] = []
+        verify_by_name: dict[str, set[str]] = {}
+        deleted_by_name: dict[str, set[str]] = {}
+        for tab in self.tabs:
+            effective = self._effective(tab)[0] or tab
+            for o in tab.object_types:
+                single = engine.build_single(effective, o.name)
+                pairs.append((single, o.name))
+                verify_by_name[o.name] = verify.get(tab.name, set()) & set(tab_labels(single))
+                deleted_by_name[o.name] = deleted.get(tab.name, set())
         try:
             export_workbook(
                 [tab for tab, _ in pairs], path, [name for _, name in pairs], spec=self.spec,
@@ -1312,6 +1473,7 @@ class MainWindow(QMainWindow):
                     {o.name: self._minimal_info(tab, o.name) for tab in self.tabs for o in tab.object_types}
                     if self._minimal_on() else None
                 ),
+                verify_by_tab=verify_by_name, deleted_by_tab=deleted_by_name,
             )
         except (OSError, ValueError) as exc:
             log.exception("Excel export failed")

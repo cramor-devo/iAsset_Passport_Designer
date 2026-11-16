@@ -269,6 +269,39 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "nl": 'De geladen specificatie heeft geen kolom "MinimaleDataset".',
     },
     "verify.tooltip": {"en": "Verify with customer", "nl": "Controleren met klant"},
+    "menu.edit": {"en": "&Edit", "nl": "B&ewerken"},
+    "verify.mark": {"en": "Mark: verify with customer", "nl": "Markeren: controleren met klant"},
+    "verify.delete": {"en": "Delete field", "nl": "Veld verwijderen"},
+    "verify.delete_marked": {
+        "en": "Delete all fields marked for verification", "nl": "Alle te controleren velden verwijderen",
+    },
+    "verify.restore": {"en": "Restore deleted fields…", "nl": "Verwijderde velden herstellen…"},
+    "verify.undo": {"en": "&Undo field change", "nl": "Veldwijziging &ongedaan maken"},
+    "verify.confirm": {
+        "en": 'Delete {count} marked fields from passport "{tab}"?',
+        "nl": '{count} gemarkeerde velden verwijderen uit paspoort "{tab}"?',
+    },
+    "verify.none_marked": {
+        "en": "No fields are marked for verification.", "nl": "Geen velden gemarkeerd om te controleren.",
+    },
+    "verify.protected": {
+        "en": "Fields in repeatable sections cannot be deleted: {fields}",
+        "nl": "Velden in herhaalbare secties kunnen niet verwijderd worden: {fields}",
+    },
+    "verify.deleted_info": {"en": "Deleted by user: {field}", "nl": "Verwijderd door gebruiker: {field}"},
+    "verify.restore_title": {"en": "Restore deleted fields", "nl": "Verwijderde velden herstellen"},
+    "verify.restore_text": {
+        "en": "Tick the fields to bring back at their generated position.",
+        "nl": "Vink de velden aan die op hun gegenereerde plek terugkomen.",
+    },
+    "verify.nothing_deleted": {"en": "No fields have been deleted.", "nl": "Er zijn geen velden verwijderd."},
+    "action.verify_marks": {
+        "en": 'Show "verify with customer" &marks', "nl": '"Controleren met klant" &tonen',
+    },
+    "verify.imported": {
+        "en": "{count} fields marked 'verify with customer' were detected in the import.",
+        "nl": "{count} velden met 'controleren met klant' herkend in de import.",
+    },
     "mock.activities": {"en": "Activities", "nl": "Activiteiten"},
     "idcheck.choose.title": {"en": "Check field IDs", "nl": "Veld-ID's controleren"},
     "idcheck.choose.text": {

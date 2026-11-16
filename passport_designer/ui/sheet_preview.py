@@ -4,11 +4,13 @@ Preview of the Excel design sheet (same layout and colours as the export / the p
 from __future__ import annotations
 
 from openpyxl.utils import get_column_letter
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QBrush, QColor, QFont, QGradient, QLinearGradient
-from PyQt6.QtWidgets import QAbstractItemView, QTableWidget, QTableWidgetItem, QWidget
+from PyQt6.QtWidgets import QAbstractItemView, QMenu, QTableWidget, QTableWidgetItem, QWidget
 
 from ..dataset_flags import MinimalMark
 from ..excel_export import SheetCell, SheetLayout, sheet_layout
+from ..i18n import tr
 from ..models import PassportTab
 
 PIXELS_PER_CHAR = 7  # Excel-kolombreedte (tekens) -> pixels / Excel column width (characters) -> pixels
@@ -22,9 +24,16 @@ SHEET_STYLE = (
 class SheetPreview(QTableWidget):
     """Toont een PassportTab als ontwerpblad (Excel-weergave). / Shows a PassportTab as a design sheet (Excel view)."""
 
+    # Velden zijn genormaliseerde namen. / Fields are normalised names.
+    verify_toggled = pyqtSignal(list)  # markeren/ontmarkeren / toggle the mark
+    delete_requested = pyqtSignal(list)  # velden verwijderen / delete fields
+    delete_marked_requested = pyqtSignal()  # alle gemarkeerde velden verwijderen / delete all marked fields
+    restore_requested = pyqtSignal()  # verwijderde velden herstellen / restore deleted fields
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("sheetPreview")
+        self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.setWordWrap(True)
         self.setStyleSheet(SHEET_STYLE)
@@ -48,6 +57,7 @@ class SheetPreview(QTableWidget):
             self.setColumnWidth(column - 1, width * PIXELS_PER_CHAR)
         for cell in layout.cells:
             item = QTableWidgetItem(cell.value)
+            item.setData(Qt.ItemDataRole.UserRole, cell.key)
             item.setForeground(QBrush(QColor(f"#{cell.colour}" if cell.colour else "#000000")))
             if cell.tip:
                 item.setToolTip(cell.tip)
@@ -66,6 +76,44 @@ class SheetPreview(QTableWidget):
             if last > cell.column:
                 self.setSpan(cell.row - 1, cell.column - 1, 1, last - cell.column + 1)
         self.resizeRowsToContents()
+
+    def selected_labels(self) -> list[str]:
+        """Genormaliseerde veldnamen van de geselecteerde veldcellen. / Normalised names of the selected field cells."""
+        labels: list[str] = []
+        for item in self.selectedItems():
+            key = item.data(Qt.ItemDataRole.UserRole)
+            if key and key not in labels:
+                labels.append(str(key))
+        return labels
+
+    def context_menu(self, labels: list[str]) -> QMenu:
+        """Contextmenu voor ``labels``; de acties sturen de signalen uit. / Context menu for ``labels``; the actions
+        emit the signals."""
+        menu = QMenu(self)
+        mark = menu.addAction(tr("verify.mark"))
+        delete = menu.addAction(tr("verify.delete"))
+        if mark is not None:
+            mark.setEnabled(bool(labels))
+            mark.triggered.connect(lambda: self.verify_toggled.emit(labels))
+        if delete is not None:
+            delete.setEnabled(bool(labels))
+            delete.triggered.connect(lambda: self.delete_requested.emit(labels))
+        menu.addSeparator()
+        for text, signal in (("verify.delete_marked", self.delete_marked_requested),
+                             ("verify.restore", self.restore_requested)):
+            action = menu.addAction(tr(text))
+            if action is not None:
+                action.triggered.connect(lambda _checked=False, s=signal: s.emit())
+        return menu
+
+    def contextMenuEvent(self, event) -> None:  # type: ignore[no-untyped-def]  # noqa: N802
+        """Klik met rechts: een niet-geselecteerde veldcel wordt eerst geselecteerd. / Right-click: an unselected field
+        cell is selected first."""
+        item = self.itemAt(event.pos())
+        if item is not None and not item.isSelected():
+            self.clearSelection()
+            item.setSelected(True)
+        self.context_menu(self.selected_labels()).exec(event.globalPos())
 
     def text_at(self, row: int, column: int) -> str:
         """Tekst in een cel (1-gebaseerd, zoals Excel). / Text in a cell (1-based, like Excel)."""

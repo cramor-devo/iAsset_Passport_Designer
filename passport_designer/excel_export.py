@@ -1,4 +1,4 @@
-﻿"""Exporteert paspoortontwerpen naar een Excel-ontwerpbestand (één tabblad per filter) met openpyxl.
+"""Exporteert paspoortontwerpen naar een Excel-ontwerpbestand (één tabblad per filter) met openpyxl.
 Exports passport designs to an Excel design file (one sheet per filter) with openpyxl."""
 
 from __future__ import annotations
@@ -81,6 +81,7 @@ class SheetCell:
     colour: str = ""  # letterkleur (RGB) voor "Opnemen = Nee"-velden / font colour for Opnemen = Nee fields
     fill_stops: tuple[str, ...] = ()  # strepen (minimale dataset) / stripes (minimal dataset)
     tip: str = ""  # tooltip in het voorbeeld / tooltip in the preview
+    key: str = ""  # genormaliseerde veldnaam van een veldcel / normalised field name of a field cell
 
 
 @dataclass
@@ -164,7 +165,7 @@ def sheet_layout(
                 cells.append(
                     SheetCell(
                         row, column, cell.display, bold=bold, italic=is_muted, colour=colour,
-                        wrap=True, merge_to=merge_to,
+                        wrap=True, merge_to=merge_to, key="" if is_notes else key,
                         fill=mark.colours[0] if mark and len(mark.colours) == 1 else "",
                         fill_stops=mark.colours if mark and len(mark.colours) > 1 else (),
                         tip="\n".join(

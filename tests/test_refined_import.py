@@ -13,7 +13,7 @@ from passport_designer.crossref import diff_workbook, label_key
 from passport_designer.excel_export import export_workbook
 from passport_designer.layout_engine import LayoutEngine, LayoutOptions
 from passport_designer.merge_advisor import merged_tab
-from passport_designer.models import SpecModel
+from passport_designer.models import SpecModel, norm
 from passport_designer.profiles import LEGACY
 from passport_designer.refined_import import read_metadata, read_refined, split_label
 from passport_designer.spec_reader import read_spec
@@ -326,3 +326,32 @@ def test_unchanged_export_resolves_ids_and_has_empty_diff(tmp_path, wave1_spec, 
     assert legacy or any(i.code == "open-design-questions" for i in result.issues)
     diffs = dict(diff_workbook(refined, wave1_spec, engine))
     assert not diffs[refined.sheets[0].name].entries
+
+
+def test_import_detects_red_text_and_green_fill_as_verify(tmp_path, exported, wave1_spec):
+    from openpyxl.styles import Font, PatternFill
+
+    workbook = load_workbook(exported)
+    sheet = workbook["Bord"]
+    sheet["B5"].font = Font(color="FFC00000")  # rood / red
+    sheet["C5"].fill = PatternFill("solid", fgColor="FF92D050")  # groen / green
+    path = tmp_path / "marked.xlsx"
+    workbook.save(path)
+    bord = read_refined(path, wave1_spec).sheets[0]
+    first = bord.tab.sections[0].rows[0]
+    assert bord.verify == {norm(first[1].label), norm(first[2].label)}
+
+
+def test_exported_marks_round_trip_into_import(tmp_path, wave1_spec):
+    tab = LayoutEngine(wave1_spec, LayoutOptions(profile=LEGACY)).build_all()[0]
+    label = tab.sections[0].rows[0][1].label
+    path = export_workbook(
+        [tab], tmp_path / "r.xlsx", spec=wave1_spec, verify_by_tab={tab.name: {norm(label)}},
+        deleted_by_tab={tab.name: {"weg"}},
+    )
+    sheet = read_refined(path, wave1_spec).sheets[0]
+    assert sheet.verify == {norm(label)} and sheet.deleted == ["weg"]
+
+
+def norm_label(value: str) -> str:
+    return norm(split_label(value)[0])

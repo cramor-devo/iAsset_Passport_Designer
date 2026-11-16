@@ -4,7 +4,9 @@
 - Added: **View → Highlight minimal dataset** (Ctrl+Shift+M, also a checkbox above the views, off by default). Minimal-dataset
   fields get a green shade (all object types of the passport), the colour of their object type, or stripes (several
   types), in the mockup, the design sheet, the PNG and the Excel exports, with a legend of the object-type colours. The
-  `_designer` sheet records `minimal_dataset_shown`. Excel stripes use a gradient fill; their rendering in Excel is unverified.- Changed: the Opnemen toggle ("Only fields with Opnemen = Ja") is now in **View** (shortcut Ctrl+Alt+O) and as a
+  `_designer` sheet records `minimal_dataset_shown`. Excel stripes use a gradient fill; their rendering in Excel is unverified.
+- Added: **Fields to verify with the customer.** In the Design sheet tab, select fields and use **Edit → Mark: verify with customer** (Ctrl+Shift+V, or the context menu): they turn red (also in the PNG and the Excel exports, with a tooltip). **Edit → Delete field** (Del), **Delete all fields marked for verification** (asks first) and **Restore deleted fields…** change the passport; **Undo field change** (Ctrl+Z) steps back. Marked fields stay in the payload until deleted; deleted fields are removed from the payload, the views and the exports and are listed on the Validation tab. Fields in repeatable sections cannot be deleted. **View → Show "verify with customer" marks** hides the red colour. A refined Excel import recognises red text and the green fill `92D050` as marks; the `_designer` sheet records `verify` and `deleted`. Marks and deletions are not saved between sessions yet.
+- Changed: the Opnemen toggle ("Only fields with Opnemen = Ja") is now in **View** (shortcut Ctrl+Alt+O) and as a
   checkbox above the views, instead of in the left panel. With the toggle off, fields with Opnemen = Nee are shown in
   grey italic in the mockup, the design sheet and the Excel export. The `_designer` sheet records `only_included`.
 - Changed: the Opnemen and MinimaleDataset flags are read per attribute from the specification (not only for the
