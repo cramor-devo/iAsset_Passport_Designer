@@ -90,8 +90,17 @@ def _unselected_tab_luminance(win: MainWindow) -> float:
     bar = win.views.tabBar()
     assert bar is not None
     index = 1 if win.views.currentIndex() == 0 else 0  # een niet-geselecteerde tab / an unselected tab
-    colour = bar.grab().toImage().pixelColor(bar.tabRect(index).center())
-    return 0.2126 * colour.redF() + 0.7152 * colour.greenF() + 0.0722 * colour.blueF()
+    image = bar.grab().toImage()
+    rect = bar.tabRect(index).adjusted(2, 2, -2, -2)
+    values = []
+    for x in range(rect.left(), rect.right() + 1, 2):
+        for y in range(rect.top(), rect.bottom() + 1, 2):
+            c = image.pixelColor(x, y)
+            values.append(0.2126 * c.redF() + 0.7152 * c.greenF() + 0.0722 * c.blueF())
+    values.sort()
+    # Mediaan = achtergrond, tekstpixels (font verschilt per OS) tellen niet mee /
+    # median = background; text pixels (fonts differ per OS) are ignored
+    return values[len(values) // 2]
 
 
 def test_light_theme_tabs_light_under_dark_system(app, tmp_path):
