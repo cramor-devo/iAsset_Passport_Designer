@@ -14,7 +14,9 @@ from PyQt6.QtGui import QColor, QPalette  # noqa: E402
 from PyQt6.QtWidgets import QApplication  # noqa: E402
 
 from passport_designer import __version__  # noqa: E402
+from passport_designer.excel_export import MUTED_COLOUR  # noqa: E402
 from passport_designer.i18n import TRANSLATIONS, translator  # noqa: E402
+from passport_designer.models import AttributeFlags, norm  # noqa: E402
 from passport_designer.settings import AppSettings  # noqa: E402
 from passport_designer.ui.main_window import MainWindow  # noqa: E402
 from passport_designer.ui.theme import DARK, LIGHT, app_stylesheet, qt_palette  # noqa: E402
@@ -184,6 +186,40 @@ def test_single_object_type_hides_unassigned_fields(window):
     assert sheet.text_at(1, 1) == "Bord" and sheet.text_at(2, 1) == "Objecttypes: Verkeersbord"
     window.type_combo.setCurrentText("APV-bord")
     assert "APV-verordening" in sheet_texts(window)  # geen voetnoot meer / no footnote any more
+
+
+def _sheet_item(window, prefix: str):
+    sheet = window.sheet_preview
+    for row in range(sheet.rowCount()):
+        for column in range(sheet.columnCount()):
+            item = sheet.item(row, column)
+            if item is not None and item.text().startswith(prefix):
+                return item
+    return None
+
+
+def test_only_included_toggle(window):
+    # Zet vlag én uitsluitingsset, zoals de inleesfunctie / Set flag and exclusion set, as the reader does
+    for object_type in ("APV-bord", "Verkeersbord"):
+        window.spec.flags.setdefault(object_type, {})[norm("breedte")] = AttributeFlags(include=False)
+        window.spec.excluded.setdefault(object_type, set()).add(norm("breedte"))
+    window.filter_list.setCurrentRow(0)  # Bord
+    window.type_combo.setCurrentText("APV-bord")
+    tab_name = window.current_tab().name
+    assert window.only_included_check.isChecked() and window.only_included_action.isChecked()
+
+    window.only_included_check.click()  # alle velden / all fields (bouwt de ontwerpen opnieuw / rebuilds designs)
+    assert not window.only_included_check.isChecked() and not window.only_included_action.isChecked()
+    item = _sheet_item(window, "breedte")
+    assert item is not None and item.font().italic()
+    assert item.foreground().color().name() == f"#{MUTED_COLOUR.lower()}"
+    assert window.settings.boolean("design/only_flagged", True) is False
+    assert window.current_tab().name == tab_name and window.type_combo.currentText() == "APV-bord"
+
+    window.only_included_action.trigger()  # terug via het menu: Nee-velden verborgen / back via the menu: hidden
+    assert window.only_included_check.isChecked() and window.only_included_action.isChecked()
+    assert _sheet_item(window, "breedte") is None
+    assert window.settings.boolean("design/only_flagged", False) is True
 
 
 def test_application_icon_renders(app):

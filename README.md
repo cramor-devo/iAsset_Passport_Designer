@@ -68,6 +68,10 @@ The log file is stored at `%LOCALAPPDATA%\iAssetPassportDesigner\passport_design
    shows exactly what the Excel export writes, laid out like the passport design workbook: the title, the object
    types below it, grey (and light blue for Sem.Rel) section headings, an empty column and the `Opmerkingen`
    reference list for fields that do not apply to every object type.
+   **View → Only fields with Opnemen = "Ja"** (**Ctrl+Alt+O**, also the checkbox above the views) is on by default and
+   leaves out the fields that are `Opnemen = "Nee"` in the specification. Turn it off to see all fields; those with
+   `Opnemen = "Nee"` are then shown in grey italic in the mockup, the design sheet and the Excel exports (with `only_included`
+   set to `false` in the `_designer` sheet). The setting is remembered.
 4. The **Merge suggestions** tab proposes filters that could share a single passport, based on the same management
    group and similar attributes (Jaccard similarity). Fields that do not apply to every object type get a footnote:
    these are the fields you switch on or off per sub-theme in iAsset. Use **Preview merged passport** to inspect a
@@ -130,6 +134,7 @@ The log file is stored at `%LOCALAPPDATA%\iAssetPassportDesigner\passport_design
 | Export Excel design… | Ctrl+E |
 | Export Excel design per object type… | Ctrl+Shift+E |
 | Export mockup as PNG… | Ctrl+P |
+| Only fields with Opnemen = "Ja" (View menu) | Ctrl+Alt+O |
 
 ## Design profiles
 

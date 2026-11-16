@@ -7,6 +7,7 @@ import re
 from collections import Counter
 from dataclasses import dataclass
 
+from .dataset_flags import source_type
 from .design_rules import (
     BLOCK_ORDER,
     SECTION_BASIS,
@@ -76,15 +77,7 @@ class LayoutEngine:
     def _source_type(self, object_type: str) -> str:
         """Objecttype zonder eigen attributen erft van het objecttype waarop de naam eindigt (Piramideblok -> Blok).
         An object type without own attributes inherits from the type its name ends with (Piramideblok -> Blok)."""
-        if self.spec.attributes.get(object_type):
-            return object_type
-        name = norm(object_type)
-        candidates = [
-            c
-            for c, attrs in self.spec.attributes.items()
-            if attrs and c != object_type and len(c) >= 3 and name.endswith(norm(c))
-        ]
-        return max(candidates, key=len, default=object_type)
+        return source_type(self.spec, object_type)
 
     def _attributes_of(self, object_type: str) -> list[str]:
         source = self._source_type(object_type)

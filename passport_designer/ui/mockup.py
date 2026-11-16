@@ -23,7 +23,7 @@ from ..compare import ELLIPSIS_CHARS
 from ..crossref import label_key
 from ..i18n import tr
 from ..layout_engine import notes_section
-from ..models import Cell, PassportTab, Section, SectionStyle
+from ..models import Cell, PassportTab, Section, SectionStyle, norm
 from ..payload import ELEMENT_MEMO, ELEMENT_ROW, section_element
 from .theme import DARK, KIND_COLOURS, Palette
 
@@ -70,6 +70,7 @@ class PassportMockup(QFrame):
         self._object_type = ""
         self._widths: list[float] = []
         self._positions: dict[tuple[int, int, int], tuple[int, int]] = {}
+        self._muted: set[str] = set()
         self._highlights: dict[str, str] = {}
         self.show_extra_tabs = True
         self._root = QVBoxLayout(self)
@@ -85,19 +86,24 @@ class PassportMockup(QFrame):
         column_widths: list[float] | None = None,
         highlights: dict[str, str] | None = None,
         positions: dict[tuple[int, int, int], tuple[int, int]] | None = None,
+        *,
+        muted: set[str] | None = None,
     ) -> None:
         """(Her)teken de mockup. Zoals in iAsset strekt elke rij haar N kolommen over de volle breedte. Bij een
         import bepalen ``column_widths`` (Excel-tekens) en ``positions`` ((sectie, rij, cel) -> (Excel-rij,
         -kolom)) de verhouding: een cel krijgt de breedte van de Excel-kolom waarin hij staat; anders zijn de kolommen
-        gelijk. ``highlights`` koppelt een genormaliseerde veldnaam aan een soort verschil (omlijning).
+        gelijk. ``highlights`` koppelt een genormaliseerde veldnaam aan een soort verschil (omlijning). ``muted`` zijn
+        genormaliseerde veldnamen met Opnemen = Nee: grijs cursief.
         (Re)draw the mockup. As in iAsset every row stretches its N columns across the full width. For an import
         ``column_widths`` (Excel characters) and ``positions`` ((section, row, cell) -> (Excel row, column)) set the
         proportions: a cell gets the width of the Excel column it sits in; otherwise columns are equal.
-        ``highlights`` maps a normalised field name to a kind of difference (outline)."""
+        ``highlights`` maps a normalised field name to a kind of difference (outline). ``muted`` are normalised field
+        names with Opnemen = Nee: grey italic."""
         self._tab, self._object_type, self._palette = tab, object_type, palette
         self._widths = [w for w in (column_widths or [])]
         self._highlights = dict(highlights or {})
         self._positions = dict(positions or {})
+        self._muted = set(muted or ())
         while self._root.count():
             item = self._root.takeAt(0)
             widget = item.widget() if item else None
@@ -125,6 +131,7 @@ class PassportMockup(QFrame):
         full.show_extra_tabs = self.show_extra_tabs
         full.show_tab(
             self._tab, self._object_type, self._palette, self._widths, self._highlights, self._positions,
+            muted=self._muted,
         )
         full.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
         full.ensurePolished()
@@ -528,26 +535,35 @@ class PassportMockup(QFrame):
         """Kopcel in de donkere band: gecentreerde vette tekst. / Header cell in the dark band: centred bold text."""
         p = self._palette
         colour = self._highlights.get(label_key(cell.label)) if self._highlights else None
+        muted = norm(cell.label) in self._muted
         head = QLabel(self._caption(cell))
         head.setObjectName("mockHead")
         head.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter)
         head.setWordWrap(True)
         tint = KIND_COLOURS.get(colour, "transparent") if colour else ""
         marker = f"border-bottom: 3px solid {tint};" if tint else ""
+        text, style = (p.muted, "font-style: italic; ") if muted else (p.text, "")
         head.setStyleSheet(
-            f"background: {p.header_band}; color: {p.text}; font-weight: 700; font-size: 8pt; "
+            f"background: {p.header_band}; color: {text}; font-weight: 700; font-size: 8pt; {style}"
             f"padding: 9px 6px; {marker}",
         )
         head.setMinimumWidth(0)
         head.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        head.setToolTip(self._tips(tab, cell, colour))
+        head.setToolTip(self._muted_tip(self._tips(tab, cell, colour), muted))
         return head, tint, colour
+
+    @staticmethod
+    def _muted_tip(tip: str, muted: bool) -> str:
+        """Voeg bij een grijs veld de uitleg 'Opnemen = Nee' toe aan de tooltip. / Add the 'Opnemen = Nee' note to a
+        muted field's tooltip."""
+        return "\n".join(part for part in (tip, tr("mock.not_included")) if part) if muted else tip
 
     def _value_box(self, tab: PassportTab, section: Section, cell: Cell, pill: bool = False) -> QWidget:
         """Waardevak, horizontaal gecentreerd in zijn kolom (gelijke marges); de tekst erin staat links met opvulling.
         Value box, horizontally centred in its column (equal margins); the text inside is left-aligned with padding."""
         p = self._palette
         colour = self._highlights.get(label_key(cell.label)) if self._highlights else None
+        muted = norm(cell.label) in self._muted
         tint = KIND_COLOURS.get(colour, "") if colour else ""
         value = QLabel(self._sample(section, cell))
         value.setObjectName("mockValue")
@@ -557,11 +573,12 @@ class PassportMockup(QFrame):
         value.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         outline = f"border: 2px solid {tint};" if tint else "border: none;"
         background = p.header_band if pill else p.input_bg
+        text, style = (p.muted, "font-style: italic; ") if muted else (p.text, "")
         value.setStyleSheet(
-            f"background: {background}; color: {p.text}; border-radius: {RADIUS}px; padding: 2px 10px; "
-            f"font-size: 9pt; {outline}",
+            f"background: {background}; color: {text}; border-radius: {RADIUS}px; padding: 2px 10px; "
+            f"font-size: 9pt; {style}{outline}",
         )
-        value.setToolTip(self._tips(tab, cell, colour))
+        value.setToolTip(self._muted_tip(self._tips(tab, cell, colour), muted))
         holder = QWidget()
         holder.setObjectName("mockValueHolder")
         layout = QHBoxLayout(holder)

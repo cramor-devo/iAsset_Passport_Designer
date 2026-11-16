@@ -1,6 +1,11 @@
 # Changelog
 
 ## 0.5.0
+- Changed: the Opnemen toggle ("Only fields with Opnemen = Ja") is now in **View** (shortcut Ctrl+Alt+O) and as a
+  checkbox above the views, instead of in the left panel. With the toggle off, fields with Opnemen = Nee are shown in
+  grey italic in the mockup, the design sheet and the Excel export. The `_designer` sheet records `only_included`.
+- Changed: the Opnemen and MinimaleDataset flags are read per attribute from the specification (not only for the
+  first object type); when two specification files disagree, the later file wins and a warning is logged.
 - Changed: clearer File-menu labels: *Open Unafact specification(s)…*, *Add Unafact specification…* and *Load passport
   field ID file…* (Dutch: *Unafact-specificatie(s) openen…*, *Unafact-specificatie toevoegen…*, *Paspoort-veld-ID-bestand
   laden…*). The shortcuts are unchanged.

@@ -70,6 +70,10 @@ Het logbestand staat in `%LOCALAPPDATA%\iAssetPassportDesigner\passport_designer
    **Ontwerpblad** toont precies wat de Excel-export schrijft, ingedeeld zoals het paspoortinrichting-bestand: de
    titel, de objecttypen eronder, grijze (en lichtblauwe voor Sem.Rel) sectiekoppen, een lege kolom en de
    verwijzingslijst `Opmerkingen` voor velden die niet voor alle objecttypen gelden.
+   **Beeld → Alleen velden met Opnemen = "Ja"** (**Ctrl+Alt+O**, ook het vinkvakje boven de weergaven) staat standaard
+   aan en laat de velden weg die in de specificatie `Opnemen = "Nee"` hebben. Zet het uit om alle velden te zien; velden
+   met `Opnemen = "Nee"` worden dan grijs cursief getoond in de mockup, het ontwerpblad en de Excel-exports (in het blad
+   `_designer` staat dan `only_included` op `false`). De keuze wordt onthouden.
 4. Het tabblad **Samenvoegadvies** stelt filters voor die samen één paspoort kunnen gebruiken. Het advies is gebaseerd
    op dezelfde beheergroep en vergelijkbare attributen (Jaccard-gelijkenis). Velden die niet voor alle objecttypen
    gelden, krijgen een voetnoot: dit zijn de velden die je in iAsset per subthema aan- of uitzet. Met **Voorbeeld
@@ -137,6 +141,7 @@ Het logbestand staat in `%LOCALAPPDATA%\iAssetPassportDesigner\passport_designer
 | Excel-ontwerp exporteren… | Ctrl+E |
 | Excel-ontwerp per objecttype exporteren… | Ctrl+Shift+E |
 | Mockup als PNG exporteren… | Ctrl+P |
+| Alleen velden met Opnemen = "Ja" (menu Beeld) | Ctrl+Alt+O |
 
 ## Ontwerpprofielen
 

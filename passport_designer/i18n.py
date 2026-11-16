@@ -39,14 +39,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "nl": "Kolom van het tabblad 'Objecttypen' die objecttypen in paspoorten groepeert (bijv. Filter, Zoekfilter, "
         "Fase). Wijzigen maakt toegepaste samenvoegingen ongedaan.",
     },
-    "panel.only_flagged": {
-        "en": "Only attributes marked for the passport",
-        "nl": "Alleen attributen die in het paspoort getoond worden",
-    },
-    "panel.only_flagged_tip": {
-        "en": "Skips attributes that are 'Nee' in 'In paspoort tonen' / 'Opnemen'.",
-        "nl": "Slaat attributen over die op 'Nee' staan bij 'In paspoort tonen' / 'Opnemen'.",
-    },
     "tab.mockup": {"en": "Mockup", "nl": "Mockup"},
     "tab.sheet": {"en": "Design sheet", "nl": "Ontwerpblad"},
     "tab.payload": {"en": "API payload", "nl": "API-payload"},
@@ -255,6 +247,15 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "nl": "Omlijn velden die afwijken van de specificatie in de mockup (uit voor schone screenshots).",
     },
     "action.extra_tabs": {"en": "Show extra &mockup tabs", "nl": "Extra &mockup-tabbladen tonen"},
+    "action.only_included": {
+        "en": 'Only fields with Opnemen = "Ja"',
+        "nl": 'Alleen velden met Opnemen = "Ja"',
+    },
+    "action.only_included_tip": {
+        "en": 'Off: show all fields from the specification; fields with Opnemen = "Nee" are shown in grey.',
+        "nl": 'Uit: toon alle velden uit de specificatie; velden met Opnemen = "Nee" worden grijs getoond.',
+    },
+    "mock.not_included": {"en": 'Opnemen = Nee in the specification', "nl": 'Opnemen = Nee in de specificatie'},
     "mock.activities": {"en": "Activities", "nl": "Activiteiten"},
     "idcheck.choose.title": {"en": "Check field IDs", "nl": "Veld-ID's controleren"},
     "idcheck.choose.text": {

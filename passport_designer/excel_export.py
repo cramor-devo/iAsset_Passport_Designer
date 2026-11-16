@@ -16,12 +16,14 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
 from . import __version__
+from .dataset_flags import excluded_labels
 from .layout_engine import LayoutEngine, notes_section
 from .merge_advisor import MergeSuggestion, field_matrix
 from .models import PassportTab, RawSheet, Section, SectionStyle, SpecModel, norm
 
 GREY = "D9D9D9"
 PURPLE = "D9D2E9"
+MUTED_COLOUR = "808080"  # letterkleur voor velden met Opnemen = Nee / font colour for Opnemen = Nee fields
 COLUMN_WIDTH = 30
 MARGIN_WIDTH = 70
 METADATA_SHEET = "_designer"
@@ -71,6 +73,7 @@ class SheetCell:
     size: int | None = None
     wrap: bool = False
     merge_to: int = 0  # laatste kolom bij samengevoegde cellen / last column of merged cells
+    colour: str = ""  # letterkleur (RGB) voor "Opnemen = Nee"-velden / font colour for Opnemen = Nee fields
 
 
 @dataclass
@@ -95,11 +98,14 @@ def _heading(cells: list[SheetCell], row: int, section: Section, tab: PassportTa
     cells.extend(SheetCell(row, column, fill=colour) for column in range(2, tab.profile.grid_columns + 1))
 
 
-def sheet_layout(tab: PassportTab) -> SheetLayout:
+def sheet_layout(tab: PassportTab, *, muted: set[str] | None = None) -> SheetLayout:
     """Indeling van één paspoortontwerp zoals in het paspoortinrichting-bestand: titel, objecttypen eronder, secties
     met grijze/blauwe koppen, een lege kolom en de opmerkingen (verwijzingen naar objecttypen) ernaast.
     Layout of one passport design as in the passport design file: title, object types below, sections with
-    grey/blue headings, an empty column and the remarks (references to object types) beside them."""
+    grey/blue headings, an empty column and the remarks (references to object types) beside them.
+    ``muted``: genormaliseerde veldnamen met Opnemen = Nee; die worden grijs cursief.
+    ``muted``: normalised field names with Opnemen = Nee; they are shown grey and italic."""
+    muted = muted or set()
     profile = tab.profile
     columns = profile.grid_columns
     margin_column = columns + 2  # één lege kolom tussen raster en opmerkingen / one empty column before the remarks
@@ -127,7 +133,13 @@ def sheet_layout(tab: PassportTab) -> SheetLayout:
             for column, cell in enumerate(row_cells, start=1):
                 bold = profile.bold_fields and not is_notes
                 merge_to = columns if is_notes and column == 1 and columns > 1 else 0
-                cells.append(SheetCell(row, column, cell.display, bold=bold, wrap=True, merge_to=merge_to))
+                is_muted = not is_notes and norm(cell.label) in muted
+                cells.append(
+                    SheetCell(
+                        row, column, cell.display, bold=bold, italic=is_muted, colour=MUTED_COLOUR if is_muted else "",
+                        wrap=True, merge_to=merge_to,
+                    ),
+                )
             remark = section.margin.get(row_index)
             if remark:
                 cells.append(SheetCell(row, margin_column, remark, wrap=True))
@@ -138,15 +150,15 @@ def sheet_layout(tab: PassportTab) -> SheetLayout:
     return layout
 
 
-def write_tab(sheet: Worksheet, tab: PassportTab) -> None:
+def write_tab(sheet: Worksheet, tab: PassportTab, *, muted: set[str] | None = None) -> None:
     """Schrijf één paspoortontwerp naar een tabblad. / Write one passport design to a sheet."""
-    layout = sheet_layout(tab)
+    layout = sheet_layout(tab, muted=muted)
     for item in layout.cells:
         target = sheet.cell(row=item.row, column=item.column, value=item.value or None)
         if item.fill:
             target.fill = PatternFill("solid", fgColor=item.fill)
-        if item.bold or item.italic or item.size:
-            target.font = Font(bold=item.bold, italic=item.italic, size=item.size)
+        if item.bold or item.italic or item.size or item.colour:
+            target.font = Font(bold=item.bold, italic=item.italic, size=item.size, color=item.colour or None)
         if item.wrap:
             target.alignment = WRAP_TOP
         if item.merge_to:
@@ -245,11 +257,13 @@ def add_reference_sheets(workbook: Workbook, spec: SpecModel, tabs: list[Passpor
 
 def write_metadata(
     workbook: Workbook, tabs: list[PassportTab], titles: list[str], spec: SpecModel | None, used: set[str],
-    reference_sheets: list[str] | None = None,
+    reference_sheets: list[str] | None = None, *, only_included: bool = True,
 ) -> None:
     """Verborgen blad '_designer' met sleutel/waarde-regels (versie, profiel, bronnen, filterkolom en per ontwerpblad
     de objecttypen, samenvoeging en voetnoten als JSON). Hidden '_designer' sheet with key/value rows (version,
-    profile, sources, filter column and per design sheet the object types, merge and footnotes as JSON)."""
+    profile, sources, filter column and per design sheet the object types, merge and footnotes as JSON).
+    ``only_included``: true als alleen velden met Opnemen = Ja zijn geëxporteerd; false = alle velden.
+    ``only_included``: true when only fields with Opnemen = Ja were exported; false = all fields."""
     sheet = workbook.create_sheet(sheet_title(METADATA_SHEET, used))
     sheet.append(["key", "value"])
     sheet.append(["format", METADATA_FORMAT])
@@ -259,6 +273,7 @@ def write_metadata(
     sheet.append(["profile", tabs[0].profile.key])
     sheet.append(["sources", json.dumps(spec.sources if spec else [], ensure_ascii=False)])
     sheet.append(["filter_column", spec.filter_column if spec else ""])
+    sheet.append(["only_included", "true" if only_included else "false"])
     sheet.append(["generated", datetime.now().isoformat(timespec="seconds")])
     for title, tab in zip(titles, tabs, strict=True):
         info = {
@@ -275,12 +290,15 @@ def write_metadata(
 
 def export_workbook(
     tabs: list[PassportTab], path: str | Path, sheet_names: list[str] | None = None, spec: SpecModel | None = None,
+    *, only_included: bool = True,
 ) -> Path:
     """Schrijf alle ontwerpen naar één xlsx-bestand; ``sheet_names`` vervangt desgewenst de tabbladnamen (bijv. per
     objecttype). Met ``spec`` komen er bronbladen bij ('Bron Objecttypen', 'Bron Attributen'); altijd komt er een
-    verborgen blad '_designer' met metadata bij.
+    verborgen blad '_designer' met metadata bij. Bij ``only_included=False`` worden velden met Opnemen = Nee grijs
+    cursief geschreven (alleen met ``spec``).
     Write all designs to one xlsx file; ``sheet_names`` optionally replaces the sheet names. With ``spec`` the
-    reference sheets ('Bron Objecttypen', 'Bron Attributen') are added; a hidden '_designer' sheet always is."""
+    reference sheets ('Bron Objecttypen', 'Bron Attributen') are added; a hidden '_designer' sheet always is.
+    With ``only_included=False`` fields with Opnemen = Nee are written grey and italic (only with ``spec``)."""
     if not tabs:
         raise ValueError("No passport designs to export.")
     workbook = Workbook()
@@ -294,10 +312,11 @@ def export_workbook(
     for tab, name in zip(tabs, names, strict=True):
         sheet = workbook.create_sheet(sheet_title(name, used))
         titles.append(sheet.title)
-        write_tab(sheet, tab)
+        muted = excluded_labels(spec, tab=tab) if spec is not None and not only_included else set()
+        write_tab(sheet, tab, muted=muted)
     if spec is not None:
         references = add_reference_sheets(workbook, spec, tabs, used)
-    write_metadata(workbook, tabs, titles, spec, used, references)
+    write_metadata(workbook, tabs, titles, spec, used, references, only_included=only_included)
     target = Path(path)
     workbook.save(target)
     return target

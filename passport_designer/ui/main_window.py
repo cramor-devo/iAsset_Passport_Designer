@@ -41,6 +41,7 @@ from PyQt6.QtWidgets import (
 
 from .. import APP_NAME, __version__
 from ..crossref import TabDiff, changed_labels, diff_workbook
+from ..dataset_flags import excluded_labels
 from ..excel_export import export_merge_report, export_workbook
 from ..field_catalog import CatalogError, FieldCatalog, load_catalog
 from ..field_map import FieldIdMap, FieldMapError
@@ -157,12 +158,9 @@ class MainWindow(QMainWindow):
         self.type_combo = QComboBox()
         self.type_label.setBuddy(self.type_combo)
         self.type_combo.currentIndexChanged.connect(self._refresh_views)
-        self.flagged_check = QCheckBox()
-        self.flagged_check.setChecked(self.settings.boolean("design/only_flagged", True))
-        self.flagged_check.toggled.connect(self._on_flagged_toggled)
         left_layout.addWidget(self.filter_label)
         left_layout.addWidget(self.filter_list, 1)
-        for widget in (self.type_label, self.type_combo, self.flagged_check):
+        for widget in (self.type_label, self.type_combo):
             left_layout.addWidget(widget)
         splitter.addWidget(left)
 
@@ -179,7 +177,20 @@ class MainWindow(QMainWindow):
         self.views.addTab(self._build_merge_tab(), "")
         self.crossref_panel = CrossRefPanel()
         self.views.addTab(self.crossref_panel, "")
-        splitter.addWidget(self.views)
+        # Werkbalkrij boven de weergaven met de Opnemen-schakelaar / Toolbar row above the views with the Opnemen toggle
+        self.only_included_check = QCheckBox()
+        self.only_included_check.setChecked(self.settings.boolean("design/only_flagged", True))
+        self.only_included_check.toggled.connect(self._set_only_included)
+        toolbar_row = QHBoxLayout()
+        toolbar_row.setContentsMargins(0, 0, 0, 0)
+        toolbar_row.addWidget(self.only_included_check)
+        toolbar_row.addStretch(1)
+        views_holder = QWidget()
+        views_layout = QVBoxLayout(views_holder)
+        views_layout.setContentsMargins(0, 0, 0, 0)
+        views_layout.addLayout(toolbar_row)
+        views_layout.addWidget(self.views, 1)
+        splitter.addWidget(views_holder)
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([320, 1040])
 
@@ -316,8 +327,12 @@ class MainWindow(QMainWindow):
         self.extra_tabs_action = self._action("action.extra_tabs", self._on_extra_tabs_toggled)
         self.extra_tabs_action.setCheckable(True)
         self.extra_tabs_action.setChecked(self.mockup.show_extra_tabs)
+        self.only_included_action = self._action("action.only_included", self._on_only_included_action, "Ctrl+Alt+O")
+        self.only_included_action.setCheckable(True)
+        self.only_included_action.setChecked(self.settings.boolean("design/only_flagged", True))
         self.view_menu.addAction(self.highlight_action)
         self.view_menu.addAction(self.extra_tabs_action)
+        self.view_menu.addAction(self.only_included_action)
         self.view_menu.addSeparator()
         self.theme_menu = self.view_menu.addMenu("") or QMenu()
         self.language_menu = self.view_menu.addMenu("") or QMenu()
@@ -380,8 +395,8 @@ class MainWindow(QMainWindow):
         self.type_label.setText(tr("panel.object_type"))
         if self.type_combo.count():
             self.type_combo.setItemText(0, tr("panel.all_types"))
-        self.flagged_check.setText(tr("panel.only_flagged"))
-        self.flagged_check.setToolTip(tr("panel.only_flagged_tip"))
+        self.only_included_check.setText(tr("action.only_included"))
+        self.only_included_check.setToolTip(tr("action.only_included_tip"))
         tab_keys = ("tab.mockup", "tab.sheet", "tab.payload", "tab.validation", "tab.merge", "tab.crossref")
         for index, key in enumerate(tab_keys):
             self.views.setTabText(index, tr(key))
@@ -884,10 +899,28 @@ class MainWindow(QMainWindow):
     def _on_filter_column_changed(self, _index: int) -> None:
         self.set_filter_column(self.column_combo.currentText())
 
-    def _on_flagged_toggled(self, checked: bool) -> None:
+    def _on_only_included_action(self) -> None:
+        self._set_only_included(self.only_included_action.isChecked())
+
+    def _set_only_included(self, checked: bool) -> None:
+        """Zet de Opnemen-schakelaar (werkbalk en menu synchroon), bewaar de keuze en bouw de ontwerpen opnieuw.
+        Set the Opnemen toggle (toolbar and menu in sync), save the choice and rebuild the designs."""
+        for widget in (self.only_included_check, self.only_included_action):
+            widget.blockSignals(True)
+            widget.setChecked(checked)
+            widget.blockSignals(False)
         self.settings.set("design/only_flagged", checked)
         if self.spec is not None:
             self._rebuild_designs()
+        else:
+            self._refresh_views()
+
+    def _muted_labels(self, tab: PassportTab | None) -> set[str]:
+        """Genormaliseerde veldnamen met Opnemen = Nee die grijs getoond worden (alleen in de modus 'alle velden').
+        Normalised field names with Opnemen = Nee to show grey (only in the 'all fields' mode)."""
+        if tab is None or self.spec is None or self.only_included_check.isChecked():
+            return set()
+        return excluded_labels(self.spec, tab=tab)
 
     def _rebuild_designs(self) -> None:
         if self.spec is None:
@@ -896,14 +929,18 @@ class MainWindow(QMainWindow):
             self._clear_import()
         current = self.current_tab()
         previous = current.name if current else ""
+        object_type = self.selected_object_type()
         self._preview = None
         self.engine = LayoutEngine(
-            self.spec, LayoutOptions(only_flagged=self.flagged_check.isChecked(), profile=self.profile),
+            self.spec, LayoutOptions(only_flagged=self.only_included_check.isChecked(), profile=self.profile),
         )
         base = self.engine.build_all()
         self.tabs = apply_merges(self.spec, self.engine, base, self.applied_merges)
         self._update_suggestions()
         self._fill_filter_list(previous)
+        index = self.type_combo.findData(object_type)
+        if object_type and index >= 0:  # de gekozen objecttype blijft gekozen / keep the chosen object type
+            self.type_combo.setCurrentIndex(index)
 
     def _fill_filter_list(self, previous: str = "") -> None:
         """Vul de paspoortlijst met ``self.tabs`` en kies ``previous`` (of de eerste). / Fill the passport list."""
@@ -1123,12 +1160,14 @@ class MainWindow(QMainWindow):
         tab = self.current_tab()
         shown = self.preview_tab()
         entry = self._imported_entry(tab)
+        muted = self._muted_labels(shown)
         self.mockup.show_tab(
             shown, self.selected_object_type(), PALETTES[self.theme_name],
             entry.sheet.column_widths if entry else None, self.current_highlights(tab),
             entry.sheet.positions if entry else None,
+            muted=muted,
         )
-        self.sheet_preview.show_tab(shown)
+        self.sheet_preview.show_tab(shown, muted=muted)
         self.payload = build_tab_payload(tab, self.ids, self.options) if tab else None
         self._render_payload_text()
         self.validation_list.clear()
@@ -1192,7 +1231,7 @@ class MainWindow(QMainWindow):
         if not path:
             return
         try:
-            export_workbook(self.tabs, path, spec=self.spec)
+            export_workbook(self.tabs, path, spec=self.spec, only_included=self.only_included_check.isChecked())
         except (OSError, ValueError) as exc:
             log.exception("Excel export failed")
             self._warn(tr("error.write", detail=str(exc)))
@@ -1213,7 +1252,10 @@ class MainWindow(QMainWindow):
         engine = self.engine
         pairs = [(engine.build_single(tab, o.name), o.name) for tab in self.tabs for o in tab.object_types]
         try:
-            export_workbook([tab for tab, _ in pairs], path, [name for _, name in pairs], spec=self.spec)
+            export_workbook(
+                [tab for tab, _ in pairs], path, [name for _, name in pairs], spec=self.spec,
+                only_included=self.only_included_check.isChecked(),
+            )
         except (OSError, ValueError) as exc:
             log.exception("Excel export failed")
             self._warn(tr("error.write", detail=str(exc)))

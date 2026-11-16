@@ -28,14 +28,14 @@ class SheetPreview(QTableWidget):
         self.setWordWrap(True)
         self.setStyleSheet(SHEET_STYLE)
 
-    def show_tab(self, tab: PassportTab | None) -> None:
+    def show_tab(self, tab: PassportTab | None, *, muted: set[str] | None = None) -> None:
         self.clearSpans()
         self.clear()
         if tab is None:
             self.setRowCount(0)
             self.setColumnCount(0)
             return
-        layout = sheet_layout(tab)
+        layout = sheet_layout(tab, muted=muted)
         self.setRowCount(layout.row_count)
         self.setColumnCount(layout.column_count)
         self.setHorizontalHeaderLabels([get_column_letter(c) for c in range(1, layout.column_count + 1)])
@@ -44,7 +44,7 @@ class SheetPreview(QTableWidget):
             self.setColumnWidth(column - 1, width * PIXELS_PER_CHAR)
         for cell in layout.cells:
             item = QTableWidgetItem(cell.value)
-            item.setForeground(QBrush(QColor("#000000")))
+            item.setForeground(QBrush(QColor(f"#{cell.colour}" if cell.colour else "#000000")))
             if cell.fill:
                 item.setBackground(QBrush(QColor(f"#{cell.fill[-6:]}")))
             font = QFont(item.font())
