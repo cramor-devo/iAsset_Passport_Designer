@@ -71,12 +71,12 @@ jobs:
         shell: pwsh
         run: ./build.ps1
 
-      # NL: De exenaam bevat de versie (bv. "iAsset Passport Designer v0.5.0.exe"); de tag is al vX.Y.Z.
-      # EN: The exe name carries the version (e.g. "iAsset Passport Designer v0.5.0.exe"); the tag is already vX.Y.Z.
+      # NL: De exenaam bevat de versie (bv. "iAsset_Passport_Designer_v0.5.0.exe"); de tag is al vX.Y.Z.
+      # EN: The exe name carries the version (e.g. "iAsset_Passport_Designer_v0.5.0.exe"); the tag is already vX.Y.Z.
       - name: Write SHA256
         shell: pwsh
         run: |
-          $exeName = "iAsset Passport Designer $env:TAG"
+          $exeName = "iAsset_Passport_Designer_$env:TAG"
           $exe = "dist/$exeName.exe"
           if (-not (Test-Path -LiteralPath $exe)) { throw "$exe not found" }
           $hash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLower()
@@ -96,6 +96,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $exe = "dist/iAsset Passport Designer $env:TAG.exe"
+          $exe = "dist/iAsset_Passport_Designer_$env:TAG.exe"
           gh release upload $env:TAG "$exe" "$exe.sha256" `
             --clobber --repo $env:GITHUB_REPOSITORY

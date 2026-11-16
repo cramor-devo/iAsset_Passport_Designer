@@ -1,5 +1,5 @@
-# Bouwt één enkel exe-bestand met de versie in de naam, bv. dist\iAsset Passport Designer v0.5.0.exe.
-# Builds a single-file exe with the version in its name, e.g. dist\iAsset Passport Designer v0.5.0.exe.
+# Bouwt één enkel exe-bestand met de versie in de naam, bv. dist\iAsset_Passport_Designer_v0.5.0.exe.
+# Builds a single-file exe with the version in its name, e.g. dist\iAsset_Passport_Designer_v0.5.0.exe.
 # Gebruik / Usage:  powershell -ExecutionPolicy Bypass -File build.ps1
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
@@ -8,7 +8,7 @@ Set-Location $PSScriptRoot
 $match = Select-String -Path "passport_designer\__init__.py" -Pattern '^__version__ = "([0-9]+\.[0-9]+\.[0-9]+)"'
 if (-not $match) { throw "__version__ not found in passport_designer\__init__.py / versie niet gevonden" }
 $version = $match.Matches[0].Groups[1].Value
-$exeName = "iAsset Passport Designer v$version"
+$exeName = "iAsset_Passport_Designer_v$version"
 
 python -m pip install -r requirements-dev.txt
 python -m PyInstaller --noconfirm --clean --onefile --windowed `
