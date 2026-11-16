@@ -9,13 +9,17 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from conftest import make_spec  # noqa: E402
-from PyQt6.QtCore import QSettings  # noqa: E402
+from PyQt6.QtCore import QSettings, Qt  # noqa: E402
+from PyQt6.QtGui import QColor, QPalette  # noqa: E402
 from PyQt6.QtWidgets import QApplication  # noqa: E402
 
+from passport_designer import __version__  # noqa: E402
+from passport_designer.excel_export import MUTED_COLOUR  # noqa: E402
 from passport_designer.i18n import TRANSLATIONS, translator  # noqa: E402
+from passport_designer.models import AttributeFlags, norm  # noqa: E402
 from passport_designer.settings import AppSettings  # noqa: E402
 from passport_designer.ui.main_window import MainWindow  # noqa: E402
-from passport_designer.ui.theme import DARK, LIGHT  # noqa: E402
+from passport_designer.ui.theme import DARK, LIGHT, app_stylesheet, qt_palette  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -53,6 +57,82 @@ def test_language_switch_changes_texts(window):
     assert window.filter_label.text() == TRANSLATIONS["panel.filters"]["nl"]
     window._set_language("en")
     assert window.filter_label.text() == TRANSLATIONS["panel.filters"]["en"]
+
+
+def test_window_title_contains_version(window):
+    assert window.windowTitle() == f"iAsset Passport Designer v{__version__}"
+
+
+def test_file_menu_labels(window):
+    assert window.open_action.text() == "&Open Unafact specification(s)…"
+    assert window.add_action.text() == "&Add Unafact specification…"
+    assert window.ids_action.text() == "Load passport field &ID file…"
+    window._set_language("nl")
+    try:
+        assert window.open_action.text() == "Unafact-specificatie(s) &openen…"
+        assert window.add_action.text() == "Unafact-specificatie &toevoegen…"
+        assert window.ids_action.text() == "Paspoort-veld-&ID-bestand laden…"
+    finally:
+        window._set_language("en")
+
+
+def _themed_window(app, tmp_path, theme: str) -> MainWindow:
+    settings = AppSettings(QSettings(str(tmp_path / f"{theme}.ini"), QSettings.Format.IniFormat))
+    settings.set("ui/language", "en")
+    settings.set("ui/theme", theme)
+    win = MainWindow(settings)
+    win.show()
+    QApplication.processEvents()
+    return win
+
+
+def _unselected_tab_luminance(win: MainWindow) -> float:
+    bar = win.views.tabBar()
+    assert bar is not None
+    index = 1 if win.views.currentIndex() == 0 else 0  # een niet-geselecteerde tab / an unselected tab
+    image = bar.grab().toImage()
+    rect = bar.tabRect(index).adjusted(2, 2, -2, -2)
+    values = []
+    for x in range(rect.left(), rect.right() + 1, 2):
+        for y in range(rect.top(), rect.bottom() + 1, 2):
+            c = image.pixelColor(x, y)
+            values.append(0.2126 * c.redF() + 0.7152 * c.greenF() + 0.0722 * c.blueF())
+    values.sort()
+    # Mediaan = achtergrond, tekstpixels (font verschilt per OS) tellen niet mee /
+    # median = background; text pixels (fonts differ per OS) are ignored
+    return values[len(values) // 2]
+
+
+def test_light_theme_tabs_light_under_dark_system(app, tmp_path):
+    dark_system = QPalette()
+    dark_system.setColor(QPalette.ColorRole.Window, QColor("#202020"))
+    app.setPalette(dark_system)  # Windows in donkermodus / Windows in dark mode
+    win = _themed_window(app, tmp_path, "light")
+    try:
+        assert _unselected_tab_luminance(win) > 0.7
+    finally:
+        win.close()
+
+
+def test_dark_theme_tabs_dark(app, tmp_path):
+    win = _themed_window(app, tmp_path, "dark")
+    try:
+        assert _unselected_tab_luminance(win) < 0.35
+    finally:
+        win.close()
+
+
+def test_app_stylesheet_has_tab_background():
+    for palette in (DARK, LIGHT):
+        css = app_stylesheet(palette)
+        assert "QTabBar::tab {" in css and f"background: {palette.frame}" in css
+        assert f"color: {palette.text}" in css
+
+
+def test_qt_palette_uses_theme_colours():
+    palette = qt_palette(LIGHT)
+    assert palette.color(QPalette.ColorRole.Window).name() == LIGHT.window
+    assert palette.color(QPalette.ColorRole.Base).name() == LIGHT.panel_bg
 
 
 def test_merge_suggestions_apply_and_reset_in_ui(window):
@@ -115,6 +195,40 @@ def test_single_object_type_hides_unassigned_fields(window):
     assert sheet.text_at(1, 1) == "Bord" and sheet.text_at(2, 1) == "Objecttypes: Verkeersbord"
     window.type_combo.setCurrentText("APV-bord")
     assert "APV-verordening" in sheet_texts(window)  # geen voetnoot meer / no footnote any more
+
+
+def _sheet_item(window, prefix: str):
+    sheet = window.sheet_preview
+    for row in range(sheet.rowCount()):
+        for column in range(sheet.columnCount()):
+            item = sheet.item(row, column)
+            if item is not None and item.text().startswith(prefix):
+                return item
+    return None
+
+
+def test_only_included_toggle(window):
+    # Zet vlag én uitsluitingsset, zoals de inleesfunctie / Set flag and exclusion set, as the reader does
+    for object_type in ("APV-bord", "Verkeersbord"):
+        window.spec.flags.setdefault(object_type, {})[norm("breedte")] = AttributeFlags(include=False)
+        window.spec.excluded.setdefault(object_type, set()).add(norm("breedte"))
+    window.filter_list.setCurrentRow(0)  # Bord
+    window.type_combo.setCurrentText("APV-bord")
+    tab_name = window.current_tab().name
+    assert window.only_included_check.isChecked() and window.only_included_action.isChecked()
+
+    window.only_included_check.click()  # alle velden / all fields (bouwt de ontwerpen opnieuw / rebuilds designs)
+    assert not window.only_included_check.isChecked() and not window.only_included_action.isChecked()
+    item = _sheet_item(window, "breedte")
+    assert item is not None and item.font().italic()
+    assert item.foreground().color().name() == f"#{MUTED_COLOUR.lower()}"
+    assert window.settings.boolean("design/only_flagged", True) is False
+    assert window.current_tab().name == tab_name and window.type_combo.currentText() == "APV-bord"
+
+    window.only_included_action.trigger()  # terug via het menu: Nee-velden verborgen / back via the menu: hidden
+    assert window.only_included_check.isChecked() and window.only_included_action.isChecked()
+    assert _sheet_item(window, "breedte") is None
+    assert window.settings.boolean("design/only_flagged", False) is True
 
 
 def test_application_icon_renders(app):
@@ -212,6 +326,7 @@ def test_import_round_trip_in_window_has_no_differences(window, exported_file):
     assert window.imported is not None and not window._busy
     assert [t.name for t in window.tabs] == original and window.filter_list.count() == len(original)
     assert window.back_action.isEnabled() and "design.xlsx" in window.windowTitle()
+    assert f"v{__version__}" in window.windowTitle()  # versie blijft ook tijdens import / version stays during import
     assert all(entry.diff is not None and entry.diff.is_empty for entry in window.imported_sheets)
     assert "No differences" in crossref_texts(window)
     window._set_language("nl")
@@ -221,7 +336,8 @@ def test_import_round_trip_in_window_has_no_differences(window, exported_file):
     assert "POST /passport-tabs" in window.payload_text.toPlainText()
     window.back_to_generated()
     assert window.imported is None and not window.back_action.isEnabled()
-    assert [t.name for t in window.tabs] == original and window.windowTitle() == "iAsset Passport Designer"
+    assert [t.name for t in window.tabs] == original
+    assert window.windowTitle() == f"iAsset Passport Designer v{__version__}"
 
 
 def test_import_without_spec_and_with_changes(window, exported_file, wave1_spec):
@@ -490,3 +606,211 @@ def test_annotation_fix_runs_in_job_and_shows_warnings(window, exported_file, mo
     failing.run_fix()
     wait_for_jobs()
     assert errors and "nee" in errors[0] and failing.fix_button.isEnabled()
+
+
+def _bg(window, prefix: str):
+    item = _sheet_item(window, prefix)
+    assert item is not None
+    return item.background()
+
+
+def _flag_minimal(window, flags: dict[str, list[str]]) -> None:
+    for attribute, types in flags.items():
+        for object_type in types:
+            window.spec.flags.setdefault(object_type, {})[norm(attribute)] = AttributeFlags(minimal=True)
+
+
+def _chip_colour(window, name: str):
+    from PyQt6.QtWidgets import QLabel
+
+    chips = window.mockup.findChildren(QLabel, "mockLegendChip")
+    return next(w.property("chipColour") for w in chips if w.text() == name)
+
+
+def test_minimal_dataset_toggle_shades_sheet_and_legend(window):
+    from passport_designer.dataset_flags import MDS_COMMON
+
+    _flag_minimal(window, {"breedte": ["APV-bord", "Verkeersbord"], "APV-verordening": ["APV-bord"]})
+    window.filter_list.setCurrentRow(0)  # Bord
+    window._refresh_views()
+    assert window.minimal_check.isEnabled() and not window.minimal_check.isChecked()
+    assert _bg(window, "breedte").style() == Qt.BrushStyle.NoBrush
+    window.minimal_check.click()
+    assert window.settings.boolean("view/minimal_dataset", False) is True and window.minimal_action.isChecked()
+    assert _bg(window, "breedte").color().name() == f"#{MDS_COMMON.lower()}"
+    own = _bg(window, "APV-verordening").color().name()
+    legend_a = _bg(window, "APV-bord").color().name()
+    assert own == legend_a == f"#{_chip_colour(window, 'APV-bord').lower()}"
+    window.minimal_action.trigger()  # uit via het menu / off via the menu
+    assert not window.minimal_check.isChecked()
+    assert _bg(window, "breedte").style() == Qt.BrushStyle.NoBrush
+
+
+def test_minimal_dataset_disabled_without_column(window):
+    window.minimal_check.setChecked(True)
+    window._refresh_views()
+    assert not window.minimal_check.isEnabled() and not window.minimal_action.isEnabled()
+    assert window.minimal_action.toolTip() == 'The loaded specification has no "MinimaleDataset" column.'
+    assert _bg(window, "breedte").style() == Qt.BrushStyle.NoBrush
+
+
+def test_minimal_dataset_png_differs_on_and_off(window, tmp_path, monkeypatch):
+    from PyQt6.QtGui import QImage
+    from PyQt6.QtWidgets import QFileDialog
+
+    _flag_minimal(window, {"breedte": ["APV-bord"]})
+    window.filter_list.setCurrentRow(0)
+    images = []
+    for on in (False, True):
+        window._set_minimal(on)
+        target = tmp_path / f"{on}.png"
+        monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *a, t=target, **k: (str(t), "")))
+        window.export_png()
+        images.append(QImage(str(target)))
+    assert images[0] != images[1]
+
+
+# --- plan 0.5.0-10: controleren met klant / verify with customer ---------------------------------------------------
+
+
+def _shown(window, prefix: str):
+    item = _sheet_item(window, prefix)
+    assert item is not None
+    return item
+
+
+def _select(window, prefix: str):
+    window.sheet_preview.clearSelection()
+    item = _sheet_item(window, prefix)
+    assert item is not None
+    item.setSelected(True)
+    return item
+
+
+def _verify_window(window):
+    window.filter_list.setCurrentRow(0)
+    window.views.setCurrentWidget(window.sheet_preview)
+    window._refresh_views()
+    return window
+
+
+def test_mark_action_turns_selected_field_red_and_toggles_off(window):
+    _verify_window(window)
+    _select(window, "breedte")
+    window.mark_action.trigger()
+    item = _shown(window, "breedte")
+    assert item.foreground().color().name() == "#c00000"
+    assert 'Verify with customer' in item.toolTip()
+    _select(window, "breedte")
+    window.mark_action.trigger()
+    assert _shown(window, "breedte").foreground().color().name() != "#c00000"
+
+
+def test_verify_marks_toggle_hides_red_and_png_differs(window, tmp_path, monkeypatch):
+    from PyQt6.QtGui import QImage
+    from PyQt6.QtWidgets import QFileDialog
+
+    _verify_window(window)
+    _select(window, "breedte")
+    window.mark_action.trigger()
+    images = []
+    for shown in (True, False):
+        window.verify_marks_action.setChecked(shown)
+        window.verify_marks_action.trigger()  # wissel / toggle
+        window.verify_marks_action.setChecked(shown)
+        window._on_verify_marks_toggled()
+        target = tmp_path / f"{shown}.png"
+        monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *a, t=target, **k: (str(t), "")))
+        window.export_png()
+        images.append(QImage(str(target)))
+    assert images[0] != images[1]
+    assert _shown(window, "breedte").foreground().color().name() != "#c00000"
+
+
+def test_marked_field_stays_in_payload_until_deleted(window):
+    _verify_window(window)
+    before = window.payload.field_count
+    _select(window, "breedte")
+    window.mark_action.trigger()
+    assert window.payload.field_count == before
+    _select(window, "breedte")
+    window.delete_action.trigger()
+    assert window.payload.field_count == before - 1
+    assert _sheet_item(window, "breedte") is None
+
+
+def test_delete_all_marked_asks_first_and_cancel_keeps_fields(window, monkeypatch):
+    from PyQt6.QtWidgets import QMessageBox
+
+    _verify_window(window)
+    _select(window, "breedte")
+    window.mark_action.trigger()
+    asked: list[str] = []
+
+    def answer(button):
+        def fake(_parent, _title, text, *_a):
+            asked.append(text)
+            return button
+        return staticmethod(fake)
+
+    monkeypatch.setattr(QMessageBox, "question", answer(QMessageBox.StandardButton.Cancel))
+    window.delete_marked_action.trigger()
+    assert asked and asked[0].startswith("Delete 1 marked fields from passport")
+    assert _sheet_item(window, "breedte") is not None
+    monkeypatch.setattr(QMessageBox, "question", answer(QMessageBox.StandardButton.Yes))
+    window.delete_marked_action.trigger()
+    assert _sheet_item(window, "breedte") is None
+    assert window.validation_list.count() and "Deleted by user" in window.validation_list.item(
+        window.validation_list.count() - 1).text()
+
+
+def test_undo_restores_deleted_field_and_restore_dialog_lists_it(window, monkeypatch):
+    from PyQt6.QtWidgets import QDialog
+
+    from passport_designer.ui.restore_dialog import RestoreDialog
+
+    _verify_window(window)
+    _select(window, "breedte")
+    window.delete_action.trigger()
+    assert window.undo_action.isEnabled()
+    window.undo_action.trigger()
+    assert _sheet_item(window, "breedte") is not None
+    _select(window, "breedte")
+    window.delete_action.trigger()
+    seen: list[list[str]] = []
+
+    def fake_exec(self):
+        seen.append([self.list.item(i).text() for i in range(self.list.count())])
+        self.list.item(0).setCheckState(Qt.CheckState.Checked)
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(RestoreDialog, "exec", fake_exec)
+    window.restore_action.trigger()
+    assert seen and seen[0][0].lower().startswith("breedte")
+    assert _sheet_item(window, "breedte") is not None
+
+
+def test_sheet_preview_context_menu_emits_signals(window):
+    _verify_window(window)
+    got: list[list[str]] = []
+    window.sheet_preview.verify_toggled.connect(got.append)
+    menu = window.sheet_preview.context_menu(["breedte"])
+    menu.actions()[0].trigger()
+    assert got == [["breedte"]]
+
+
+def test_orphan_types_reported():
+    from passport_designer.models import ObjectType, SpecModel
+
+    spec = SpecModel(
+        object_types=[ObjectType("Put", "Put")],
+        attributes={"Put": ["diepte"], "Waterplanten": ["soort"], "Leeg": []},
+    )
+    assert spec.orphan_types() == ["Waterplanten"]
+
+
+def test_orphan_type_shown_in_validation_list(window):
+    window.spec.attributes["Waterplanten"] = ["soort"]
+    window._refresh_views()
+    items = [window.validation_list.item(i).text() for i in range(window.validation_list.count())]
+    assert any('Object type "Waterplanten" has attributes but no row in Objecttypen' in t for t in items)

@@ -56,6 +56,16 @@ class AppSettings:
     def set(self, key: str, value: object) -> None:
         self._qs.setValue(key, value)
 
+    def layouts_dir(self) -> Path:
+        """Map voor automatisch bewaarde indelingen: naast een ini-bestand (tests), anders in de gegevensmap.
+        Folder for autosaved layouts: next to an ini file (tests), otherwise in the data folder."""
+        if self._qs.format() == QSettings.Format.IniFormat:
+            folder = Path(self._qs.fileName()).parent / "layouts"
+        else:
+            folder = data_dir() / "layouts"
+        folder.mkdir(parents=True, exist_ok=True)
+        return folder
+
     def payload_options(self) -> PayloadOptions:
         # NL: nieuwe sleutels (payload/v2/...) zodat oude opgeslagen standaardwaarden (1/0/0) niet overschrijven.
         # EN: new keys (payload/v2/...) so old saved defaults (1/0/0) do not override the new ones.

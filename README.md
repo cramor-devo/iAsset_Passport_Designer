@@ -19,7 +19,7 @@ The interface is available in English and Dutch (**View → Language**).
 
 ## Download (Windows)
 
-Download `iAsset_Passport_Designer.exe` from the latest [release](../../releases). It is a single file and does not
+Download `iAsset Passport Designer vX.Y.Z.exe` (for example `iAsset Passport Designer v0.5.0.exe`) from the latest [release](../../releases). It is a single file and does not
 need Python. The executable is not code-signed, so Windows SmartScreen may show a warning the first time you start it.
 
 To build the executable yourself, run:
@@ -28,7 +28,8 @@ To build the executable yourself, run:
 powershell -ExecutionPolicy Bypass -File build.ps1
 ```
 
-The result is written to `dist\iAsset_Passport_Designer.exe`.
+The result is written to `dist\iAsset Passport Designer vX.Y.Z.exe`, where the version is read from `__version__`. The
+window title shows the same version.
 
 ### Releasing
 
@@ -37,8 +38,8 @@ You do not need to build locally to release. Set `__version__` in `passport_desi
 `v<version>` (see [Development](#development)).
 
 You can also publish a GitHub release yourself with tag `vX.Y.Z` (matching the version). The **Release** workflow then
-runs the tests on `windows-latest`, builds the exe with `build.ps1` and attaches `iAsset_Passport_Designer.exe` and
-`iAsset_Passport_Designer.exe.sha256` to that release. To rebuild or add the SHA256 file to an existing release, run
+runs the tests on `windows-latest`, builds the exe with `build.ps1` and attaches `iAsset Passport Designer vX.Y.Z.exe` and
+`iAsset Passport Designer vX.Y.Z.exe.sha256` to that release. To rebuild or add the SHA256 file to an existing release, run
 it manually (**Actions → Release → Run workflow**) with its tag.
 
 ## Installation from source
@@ -54,7 +55,7 @@ The log file is stored at `%LOCALAPPDATA%\iAssetPassportDesigner\passport_design
 
 ## Usage
 
-1. Choose **File → Open specification(s)…** and select one or more xlsx files. Use **Add specification…** to add
+1. Choose **File → Open Unafact specification(s)…** and select one or more xlsx files. Use **Add Unafact specification…** to add
    another file to what is already loaded, for example Wave 2 on top of Wave 1. Each file needs an `Objecttypen` sheet
    (column Objecttype plus Filter, Zoekfilter or Fase; optionally Groep) and an `Attributen` sheet (columns
    Objecttype, Attribuut).
@@ -67,6 +68,30 @@ The log file is stored at `%LOCALAPPDATA%\iAssetPassportDesigner\passport_design
    shows exactly what the Excel export writes, laid out like the passport design workbook: the title, the object
    types below it, grey (and light blue for Sem.Rel) section headings, an empty column and the `Opmerkingen`
    reference list for fields that do not apply to every object type.
+   **View → Only fields with Opnemen = "Ja"** (**Ctrl+Alt+O**, also the checkbox above the views) is on by default and
+   leaves out the fields that are `Opnemen = "Nee"` in the specification. Turn it off to see all fields; those with
+   `Opnemen = "Nee"` are then shown in grey italic in the mockup, the design sheet and the Excel exports (with `only_included`
+   set to `false` in the `_designer` sheet). The setting is remembered.
+   **View → Highlight minimal dataset** (**Ctrl+Shift+M**, also a checkbox above the views; off by default, remembered;
+   disabled when the specification has no `MinimaleDataset` column) shades the minimal-dataset fields: **green** when
+   the field is in the minimal dataset of all object types of the passport, **the colour of that object type** when
+   it is for one type only, and **stripes** of those types' colours for several types. A legend (the object-type names in
+   their colours plus *All types* in green) appears under the header, and the tooltip names the types. The shades and
+   legend are also written to the PNG and the Excel exports while the toggle is on.
+   **Fields to verify with the customer:** in the Design sheet tab, select fields and choose **Edit → Mark: verify with
+   customer** (**Ctrl+Shift+V**, also in the right-click menu). They turn red in the views, the PNG and the Excel exports
+   (tooltip *Verify with customer*) and stay in the payload. **Edit → Delete field** (**Del**), **Delete all fields
+   marked for verification** (asks first) and **Restore deleted fields…** remove or bring back fields; **Ctrl+Z**
+   undoes the last change. Deleted fields leave the payload, the views and the exports and are listed on the Validation
+   tab; fields in repeatable sections cannot be deleted. **View → Show "verify with customer" marks** hides the red
+   colour. Importing a refined Excel recognises red text and the green fill `92D050` as marks. Marks and deletions are
+   not remembered between sessions yet.
+   **Design profiles:** *Rotterdam v3* has at most 5 fields per row and includes *Gekoppelde objecten (Sem.Rel)*,
+   *Inwinningsinformatie (Sem.Rel)*, a *Datum* column in Memo, *Distributiegebied*/*Stroomgebied* in Locatie informatie
+   and *Beheerobjectomschrijving* in Overige informatie. When importing a refined Excel, text beside the grid is read as
+   a remark, section titles are normalised (with a warning), placeholder rows (`..., etc.`, `.....`) are skipped, `**`
+   is linked to its remark and rows with more than 5 fields give a warning. Object types that have attributes but no
+   row in Objecttypen are listed on the Validation tab.
 4. The **Merge suggestions** tab proposes filters that could share a single passport, based on the same management
    group and similar attributes (Jaccard similarity). Fields that do not apply to every object type get a footnote:
    these are the fields you switch on or off per sub-theme in iAsset. Use **Preview merged passport** to inspect a
@@ -77,7 +102,7 @@ The log file is stored at `%LOCALAPPDATA%\iAssetPassportDesigner\passport_design
    characters, unique). If the passports differ in management group or filter, the dialog lists the differences and you
    must confirm explicitly (Cancel is the default). A manual merge can be undone like any other merge and is not
    available while an imported design is shown.
-5. Choose **File → Load field ID file…** to load the V2 passport diverse-fields list (e.g. `passport field list.csv`, semicolon CSV with
+5. Choose **File → Load passport field ID file…** to load the V2 passport diverse-fields list (e.g. `passport field list.csv`, semicolon CSV with
    `id;label;name;type;values;…`; JSON and xlsx with label/name and id also work). Each passport field gets the `id`
    of the diverse field with the same label. The iAsset GUI field catalog (xlsx with the sheets `Paspoort velden` and
    `Thema Subthema`) is accepted as well. Without field IDs, `field_id` is set to `null` and the **Validation** tab
@@ -110,6 +135,28 @@ The log file is stored at `%LOCALAPPDATA%\iAssetPassportDesigner\passport_design
     `Opmerkingen` text beside the right rows. Layout and styling stay untouched and the original file is not changed.
     The tool warns if the sheet contains drawings.
 
+### Reordering fields
+
+In the **Design sheet** tab you can drag a field to another place: in the same row, in another row or in another
+section. Dropping on a section heading appends the field to that section; dropping on an empty row fills it. Right-click for
+**Insert empty row above/below**, **New section below…**, **Rename section…**, **Delete empty row** and **Reset order of
+this passport**. A row holds at most 5 fields, and repeatable sections and Notes can only be moved as a whole. The Design
+sheet is leading: the mockup, the PNG, the Excel exports and the payload follow your order. Undo/Redo: Ctrl+Z / Ctrl+Y.
+The layout (with marks and deletions) is saved per passport and specification; **File → Save layout… / Load layout…**
+share it as a JSON file. Dragging is unavailable while one object type is selected.
+
+### Bulk export
+
+The **Bulk export** tab writes many PNG images at once. Tick passports (one image of the whole passport, named after the
+tab, e.g. `Dragers.png`) and/or object types below them (named after the object type, e.g. `Persleiding.png`); use the
+filter box, **Select all**, **Select none** and **Expand all**. Choose **Folder for passport images…** and **Folder for
+object type images…** (remembered). If a name occurs twice, the passport is added in brackets: `Persleiding (Dragers).png`.
+The options (dark/light theme, only fields with Opnemen = "Ja", highlight minimal dataset, "verify with customer"
+marks, extra tabs) start from the current view, and changing them here does not change the view. Images are identical to
+**Export mockup as PNG** and include your layout changes and deletions. **Export N images** shows progress; **Cancel**
+keeps the files already written. Existing files ask **Overwrite all / Skip existing / Cancel**. Failed images are listed
+in the report, with **Open folder**.
+
 ### Recommended workflow
 
 1. Export the Excel design (**File → Export Excel design…**) and refine it in Excel.
@@ -121,7 +168,7 @@ The log file is stored at `%LOCALAPPDATA%\iAssetPassportDesigner\passport_design
 
 | Action | Shortcut |
 |---|---|
-| Load field ID file… | Ctrl+I |
+| Load passport field ID file… | Ctrl+I |
 | Check field IDs… | Ctrl+Shift+D |
 | Import refined Excel… | Ctrl+Shift+I |
 | Check/fix annotations… | Ctrl+Shift+A |
@@ -129,6 +176,10 @@ The log file is stored at `%LOCALAPPDATA%\iAssetPassportDesigner\passport_design
 | Export Excel design… | Ctrl+E |
 | Export Excel design per object type… | Ctrl+Shift+E |
 | Export mockup as PNG… | Ctrl+P |
+| Only fields with Opnemen = "Ja" (View menu) | Ctrl+Alt+O |
+| Highlight minimal dataset (View menu) | Ctrl+Shift+M |
+| Mark: verify with customer (Edit menu) | Ctrl+Shift+V |
+| Delete field / Undo / Redo field change (Edit menu) | Del / Ctrl+Z / Ctrl+Y |
 
 ## Design profiles
 

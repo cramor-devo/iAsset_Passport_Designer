@@ -23,7 +23,10 @@ def test_section_order_and_basis(wave1_spec):
     tab = v3_tab(wave1_spec, "Bord")
     titles = [s.title for s in tab.sections]
     assert titles[:4] == ["Basis", "Object informatie", "Locatie informatie", "Beleidsinformatie"]
-    assert titles[-4:] == ["Actoren en rollen (Sem.Rel)", "Memo (Sem.Rel)", "Overige informatie", "Geometrie"]
+    assert titles[-6:] == [
+        "Gekoppelde objecten (Sem.Rel)", "Actoren en rollen (Sem.Rel)", "Inwinningsinformatie (Sem.Rel)",
+        "Memo (Sem.Rel)", "Overige informatie", "Geometrie",
+    ]
     assert [c.label for c in tab.sections[0].rows[0]] == ["Nummer", "Objecttype", "IMBOR Filter*", "Thema", "Subthema"]
     assert "IMBOR filter zit niet" in tab.sections[0].margin[0]
 
@@ -140,3 +143,52 @@ def test_compare_detects_removed_and_added_fields(tmp_path, wave1_spec):
 def test_profiles_registry_and_default():
     assert set(PROFILES) == {"rotterdam_v3", "legacy"}
     assert make_spec() is not None
+
+
+def _section(tab, title: str):
+    return next(s for s in tab.sections if s.title == title)
+
+
+def test_memo_has_datum_and_inwinning_repeater(wave1_spec):
+    tab = v3_tab(wave1_spec, "Bord")
+    assert [c.label for c in _section(tab, "Memo (Sem.Rel)").rows[0]] == ["Nummer", "Memo veld", "Datum"]
+    inwinning = _section(tab, "Inwinningsinformatie (Sem.Rel)")
+    assert inwinning.repeater and [c.label for c in inwinning.rows[0]] == ["Datum", "Attribuut", "Wijze van inwinning"]
+    assert len(inwinning.rows) == 4  # 3 voorbeeldrijen + '...' / 3 sample rows + '...'
+
+
+def test_linked_objects_is_a_single_column_list(wave1_spec):
+    section = _section(v3_tab(wave1_spec, "Bord"), "Gekoppelde objecten (Sem.Rel)")
+    assert section.repeater and all(len(row) == 1 for row in section.rows)
+
+
+def test_locatie_row_two_has_distribution_and_catchment_with_remark(wave1_spec):
+    locatie = _section(v3_tab(wave1_spec, "Bord"), "Locatie informatie")
+    labels = [c.label for row in locatie.rows for c in row]
+    assert "Distributiegebied" in labels and "Stroomgebied" in labels
+    assert any("Bevind zich in" in text for text in locatie.margin.values())
+
+
+def test_overige_informatie_content_and_beheerobjectomschrijving_not_excluded(wave1_spec):
+    from passport_designer.profiles import ROTTERDAM_V3
+
+    overige = _section(v3_tab(wave1_spec, "Bord"), "Overige informatie")
+    labels = [c.label for row in overige.rows for c in row]
+    assert labels[:3] == ["iAssetID", "Beheerobjectomschrijving", "conversie-id"] and "clusternummer" not in labels
+    assert "beheerobjectomschrijving" not in ROTTERDAM_V3.excluded
+
+
+def test_no_generated_row_is_wider_than_five_fields(wave1_spec):
+    from passport_designer.layout_engine import LayoutEngine, LayoutOptions
+    from passport_designer.profiles import ROTTERDAM_V3
+
+    tabs = LayoutEngine(wave1_spec, LayoutOptions(profile=ROTTERDAM_V3)).build_all()
+    assert tabs and all(len(row) <= 5 for tab in tabs for s in tab.sections for row in s.rows)
+    assert ROTTERDAM_V3.grid_columns == 5
+
+
+def test_borden_aan_drager_applies_to_waterinrichtingsobject():
+    from passport_designer.profiles import ROTTERDAM_V3
+
+    sections = ROTTERDAM_V3.relations_for(["Waterinrichtingsobject"])
+    assert "Borden aan drager" in [r.title for r in sections]

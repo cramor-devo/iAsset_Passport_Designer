@@ -11,12 +11,13 @@ from zipfile import BadZipFile
 from openpyxl import load_workbook
 from openpyxl.utils.exceptions import InvalidFileException
 
-from .models import DEFAULT_FILTER_COLUMNS, ObjectType, RawSheet, SpecModel, norm
+from .models import DEFAULT_FILTER_COLUMNS, AttributeFlags, ObjectType, RawSheet, SpecModel, norm
 
 log = logging.getLogger(__name__)
 
 HEADER_SCAN_ROWS = 15
 FLAG_COLUMNS = ("in paspoort tonen", "opnemen")
+MDS_COLUMNS = ("minimaledataset", "minimale dataset")
 ProgressCallback = Callable[[str], None]
 
 
@@ -144,6 +145,7 @@ def _read_object_types(rows: Iterator[tuple[object, ...]], spec: SpecModel) -> N
 def _read_attributes(rows: Iterator[tuple[object, ...]], spec: SpecModel) -> None:
     headers, _, body = _rows_with_header(rows, ("objecttype", "attribuut"))
     flag_index = next((headers[c] for c in FLAG_COLUMNS if c in headers), None)
+    mds_index = next((headers[c] for c in MDS_COLUMNS if c in headers), None)
     type_index, attr_index = headers["objecttype"], headers["attribuut"]
     seen: dict[str, set[str]] = {}
     for row in body:
@@ -156,5 +158,19 @@ def _read_attributes(rows: Iterator[tuple[object, ...]], spec: SpecModel) -> Non
         if key not in seen.setdefault(type_name, set()):
             seen[type_name].add(key)
             spec.attributes.setdefault(type_name, []).append(attribute)
-        if flag_index is not None and flag_index < len(row) and norm(_text(row[flag_index])) == "nee":
+        include = _yes_no(row[flag_index]) if flag_index is not None and flag_index < len(row) else None
+        minimal = _yes_no(row[mds_index]) if mds_index is not None and mds_index < len(row) else None
+        if include is not None or minimal is not None:
+            spec.flags.setdefault(type_name, {})[key] = AttributeFlags(include, minimal)
+        if include is False:
             spec.excluded.setdefault(type_name, set()).add(key)
+
+
+def _yes_no(value: object) -> bool | None:
+    """Ja -> True, Nee -> False, anders (leeg of onbekend) -> None. / Ja -> True, Nee -> False, else None."""
+    text = norm(_text(value))
+    if text == "ja":
+        return True
+    if text == "nee":
+        return False
+    return None

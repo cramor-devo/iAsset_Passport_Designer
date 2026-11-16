@@ -144,14 +144,32 @@ def test_memo_is_a_table_with_search_boxes_and_pager(tab):
     tables = mockup.findChildren(QWidget, "mockTable")
     assert len(tables) >= 1
     table = next(t for t in tables if t.findChildren(QLabel, "mockNoData"))
-    assert [t.text() for t in table.findChildren(QLabel, "mockTableHead")] == ["Nummer", "Memo veld"]
+    assert [t.text() for t in table.findChildren(QLabel, "mockTableHead")] == ["Nummer", "Memo veld", "Datum"]
     assert all(t.alignment() & Qt.AlignmentFlag.AlignLeft for t in table.findChildren(QLabel, "mockTableHead"))
-    assert [b.text() for b in table.findChildren(QLabel, "mockSearch")] == ["Zoeken op nummer", "Zoeken op memo veld"]
+    assert [b.text() for b in table.findChildren(QLabel, "mockSearch")] == [
+        "Zoeken op nummer", "Zoeken op memo veld", "Zoeken op datum",
+    ]
     assert len(table.findChildren(QLabel, "mockTableIcon")) == 3
     assert table.findChildren(QLabel, "mockNoData")[0].text() == tr("mock.no_data")
     assert table.findChildren(QLabel, "mockPagerText")[0].text() == tr("mock.pager")
     assert len(table.findChildren(QLabel, "mockPagerButton")) == 4
     assert not table.findChildren(QLabel, "mockHead")  # geen donkere band / no dark band
+
+
+def test_verify_mark_applies_to_table_header_and_search_box(tab):
+    from passport_designer.ui.theme import VERIFY_TEXT
+
+    mockup = PassportMockup()
+    mockup.show_tab(tab, "", DARK, verify={"memo veld"})
+    table = next(t for t in mockup.findChildren(QWidget, "mockTable") if t.findChildren(QLabel, "mockNoData"))
+    heads = {h.text(): h.styleSheet() for h in table.findChildren(QLabel, "mockTableHead")}
+    boxes = {b.text(): b.styleSheet() for b in table.findChildren(QLabel, "mockSearch")}
+    assert VERIFY_TEXT in heads["Memo veld"] and VERIFY_TEXT in boxes["Zoeken op memo veld"]
+    assert VERIFY_TEXT not in heads["Nummer"] and VERIFY_TEXT not in boxes["Zoeken op nummer"]
+    mockup.show_tab(tab, "", DARK)
+    plain = next(t for t in mockup.findChildren(QWidget, "mockTable") if t.findChildren(QLabel, "mockNoData"))
+    assert all(VERIFY_TEXT not in h.styleSheet() for h in plain.findChildren(QLabel, "mockTableHead"))
+    assert any(f"color: {DARK.text};" in h.styleSheet() for h in plain.findChildren(QLabel, "mockTableHead"))
 
 
 def test_table_sections_are_configurable_per_profile(tab):
@@ -197,3 +215,42 @@ def test_relation_sections_render_as_tables_with_sample_rows(app):
 def test_extra_table_prefixes_still_work():
     profile = ROTTERDAM_V3.__class__(**{**ROTTERDAM_V3.__dict__, "table_sections": ("Memo", "Foo")})
     assert is_relation_table(Section("Foo bar"), profile) and not is_relation_table(Section("Basis"), profile)
+
+
+# --- Minimale dataset / Minimal dataset ----------------------------------------------------------------------
+
+from passport_designer.dataset_flags import MDS_COMMON, MinimalMark  # noqa: E402
+
+
+def _head_style(mockup: PassportMockup, text: str) -> str:
+    return next(w.styleSheet() for w in mockup.findChildren(QLabel, "mockHead") if w.text() == text)
+
+
+def test_type_shade_in_render_pixmap(tab):
+    plain, shaded = PassportMockup(scrollable=False), PassportMockup(scrollable=False)
+    plain.show_tab(tab, "", DARK)
+    marks = {"breedte": MinimalMark(("FFE699",), ("APV-bord",))}
+    shaded.show_tab(tab, "", DARK, minimal=marks, legend={"APV-bord": "FFE699"})
+    assert "background: #" in _head_style(shaded, "breedte")
+    assert _head_style(shaded, "breedte") != _head_style(plain, "breedte")
+    assert _head_style(shaded, "hoogte") == _head_style(plain, "hoogte")
+    assert shaded.render_pixmap().toImage() != plain.render_pixmap().toImage()  # render_pixmap kopieert de tint
+    tip = next(w.toolTip() for w in shaded.findChildren(QLabel, "mockHead") if w.text() == "breedte")
+    assert tip == tr("minimal.tooltip", types="APV-bord")
+
+
+def test_stripes_use_gradient(tab):
+    mockup = PassportMockup(scrollable=False)
+    mockup.show_tab(tab, "", DARK, minimal={"breedte": MinimalMark(("FFE699", "F8CBAD"), ("A", "B"))})
+    assert "qlineargradient" in _head_style(mockup, "breedte")
+
+
+def test_legend_chips_present(tab):
+    mockup = PassportMockup(scrollable=False)
+    mockup.show_tab(tab, "", DARK, legend={"APV-bord": "FFE699", "Verkeersbord": "F8CBAD"})
+    chips = [w.text() for w in mockup.findChildren(QLabel, "mockLegendChip")]
+    assert chips == ["APV-bord", "Verkeersbord", tr("minimal.all_types")]
+    colours = [w.property("chipColour") for w in mockup.findChildren(QLabel, "mockLegendChip")]
+    assert colours[-1] == MDS_COMMON
+    mockup.show_tab(tab, "", DARK)
+    assert not mockup.findChildren(QLabel, "mockLegendChip")

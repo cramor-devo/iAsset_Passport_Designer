@@ -36,6 +36,8 @@ class FixedSection:
     repeat: int = 1
     optional: frozenset[str] = frozenset()
     grey: bool = False  # forceer grijs i.p.v. de (Sem.)-kleur / force grey instead of the (Sem.) colour
+    # Opmerking naast de rij die met dit eerste veld begint. / Remark beside the row that starts with this first field.
+    remarks: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -112,7 +114,7 @@ V3_EXCLUDED = frozenset(
     {
         "geostatus", "in onderzoek", "locatieaanduiding", "nummer", "relatieve hoogteligging", "status", "naam",
         "alternatieve naam", "ambitieniveau", "beheerafspraak", "beheerder", "beheerder gedetailleerd", "eigenaar",
-        "eigenaar gedetailleerd", "onderhoudsplichtige", "imbor type", "beheerobjectomschrijving", "volgnummer",
+        "eigenaar gedetailleerd", "onderhoudsplichtige", "imbor type", "volgnummer",
         "lv-publicatiedatum", "domein", "identificatie geovoorziening", "plaatsingsjaar",
     },
 )
@@ -154,24 +156,34 @@ ROTTERDAM_V3 = DesignProfile(
     after_object=(
         FixedSection(
             "Locatie informatie",
-            (("Openbare ruimte", "Subbuurtdeelnaam", "Buurtnaam", "Wijknaam"), ("Gemeentenaam", "Ligging")),
+            (
+                ("Openbare ruimte", "Subbuurtdeelnaam", "Buurtnaam", "Wijknaam"),
+                ("Gemeentenaam", "Ligging", "Distributiegebied", "Stroomgebied"),
+            ),
+            remarks=(("Gemeentenaam", "Distributiegebied en Stroomgebied: via Bevind zich in…"),),
         ),
         FixedSection(
             "Beleidsinformatie",
             (("structuurniveau", "structuurgebied", "kwaliteitsniveau", "bestemming", "wegcategorie duurzaam veilig"),),
             optional=frozenset({"wegcategorie duurzaam veilig"}),
         ),
+        # Lijst met gekoppelde objecten, één kolom; de inhoud verschilt per objecttype.
+        # List of linked objects, one column; the content differs per object type.
+        FixedSection("Gekoppelde objecten (Sem.Rel)", (("Gekoppeld object",),), repeater=True, repeat=2),
         FixedSection(
             "Actoren en rollen (Sem.Rel)",
             (("Rol", "Rol gedetailleerd", "Actor", "Actor Gedetailleerd"),),
             repeater=True,
             repeat=2,
         ),
-        FixedSection("Memo (Sem.Rel)", (("Nummer", "Memo veld"),), repeater=True, repeat=3),
+        FixedSection(
+            "Inwinningsinformatie (Sem.Rel)", (("Datum", "Attribuut", "Wijze van inwinning"),), repeater=True, repeat=3,
+        ),
+        FixedSection("Memo (Sem.Rel)", (("Nummer", "Memo veld", "Datum"),), repeater=True, repeat=3),
         FixedSection(
             "Overige informatie",
-            (("iAssetID", "clusternummer", "conversie-id", "identificatie"),),
-            optional=frozenset({"clusternummer", "identificatie"}),
+            (("iAssetID", "Beheerobjectomschrijving", "conversie-id", "identificatie", "themaklasse"),),
+            optional=frozenset({"identificatie", "themaklasse"}),
         ),
         FixedSection("Geometrie", (("geometrie",),), grey=True),
     ),

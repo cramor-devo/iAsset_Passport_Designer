@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.5.0
+- Added: **Bulk export** tab (the 7th tab) writes many PNGs in one go. Check passports (one image of the whole passport, named after the tab, e.g. `Dragers.png`) and/or object types (named after the type, e.g. `Persleiding.png`), filter the list, and choose the folder for passport images and the folder for object type images (remembered). A name that already exists in the run gets the tab in brackets (`Persleiding (Dragers).png`). Options: dark/light theme, only fields with Opnemen = "Ja", highlight minimal dataset, "verify with customer" marks and extra tabs; they start from the current view but never change it. Every image equals what **Export mockup as PNG** gives for the same selection and includes your layout changes and deletions. A progress bar with **Cancel** keeps the files already written; existing files ask first (**Overwrite all / Skip existing / Cancel**); errors per image are listed in the end report with **Open folder**. Exporting the Design sheet as PNG is not included yet.
+- Added: **drag and drop in the Design sheet.** Drag a field to another place in its row, another row or another section (dropping on a section heading appends it; dropping on an empty row fills it). Right-click: **Insert empty row above/below**, **New section below…** (with a title and style), **Rename section…**, **Delete empty row** and **Reset order of this passport**. A row holds at most 5 fields; repeatable sections and Notes can only be moved as a whole. The Design sheet is leading: the mockup, the PNG, the Excel exports and the API payload all follow it (an empty row is skipped in the payload, a new section becomes a group with its title; footnotes are renumbered). **Edit → Redo field change** (Ctrl+Y) and Undo work for moves. The layout is saved automatically per passport and specification, and **File → Save layout… / Load layout…** share it as JSON; fields that are no longer in the specification are reported on the Validation tab. Dragging is off while a single object type is selected. The `_designer` sheet records the layout (`layout`), which a refined import reads back.
+- Added: **View → Highlight minimal dataset** (Ctrl+Shift+M, also a checkbox above the views, off by default). Minimal-dataset
+  fields get a green shade (all object types of the passport), the colour of their object type, or stripes (several
+  types), in the mockup, the design sheet, the PNG and the Excel exports, with a legend of the object-type colours. The
+  `_designer` sheet records `minimal_dataset_shown`. Excel stripes use a gradient fill; their rendering in Excel is unverified.
+- Added: **Fields to verify with the customer.** In the Design sheet tab, select fields and use **Edit → Mark: verify with customer** (Ctrl+Shift+V, or the context menu): they turn red (also in the PNG and the Excel exports, with a tooltip). **Edit → Delete field** (Del), **Delete all fields marked for verification** (asks first) and **Restore deleted fields…** change the passport; **Undo field change** (Ctrl+Z) steps back. Marked fields stay in the payload until deleted; deleted fields are removed from the payload, the views and the exports and are listed on the Validation tab. Fields in repeatable sections cannot be deleted. **View → Show "verify with customer" marks** hides the red colour. A refined Excel import recognises red text and the green fill `92D050` as marks; the `_designer` sheet records `verify` and `deleted`. Marks, deletions and the layout are saved per passport and per specification (next to the settings) and restored on the next start.
+- Changed: the **Rotterdam v3** profile follows the refined Wave 2 workbook: new sections *Gekoppelde objecten (Sem.Rel)* and *Inwinningsinformatie (Sem.Rel)*, a *Datum* column in Memo, *Distributiegebied* and *Stroomgebied* in Locatie informatie, *Beheerobjectomschrijving* in Overige informatie (no *clusternummer*), and *Borden aan drager* for Waterinrichtingsobject. Rows never hold more than 5 fields. Every new export therefore differs from earlier ones.
+- Fixed: importing a refined Excel no longer reads remark text beside the grid as a field, normalises section titles that differ only in brackets or suffix (with a warning), skips placeholder rows (`..., etc.`, `.....`), links `**` to its remark and warns for rows with more than 5 fields. Object types with attributes but no row in Objecttypen are reported on the Validation tab.
+- Changed: the Opnemen toggle ("Only fields with Opnemen = Ja") is now in **View** (shortcut Ctrl+Alt+O) and as a
+  checkbox above the views, instead of in the left panel. With the toggle off, fields with Opnemen = Nee are shown in
+  grey italic in the mockup, the design sheet and the Excel export. The `_designer` sheet records `only_included`.
+- Changed: the Opnemen and MinimaleDataset flags are read per attribute from the specification (not only for the
+  first object type); when two specification files disagree, the later file wins and a warning is logged.
+- Changed: clearer File-menu labels: *Open Unafact specification(s)…*, *Add Unafact specification…* and *Load passport
+  field ID file…* (Dutch: *Unafact-specificatie(s) openen…*, *Unafact-specificatie toevoegen…*, *Paspoort-veld-ID-bestand
+  laden…*). The shortcuts are unchanged.
+- Fixed: with Windows in dark mode, the light theme showed black tab headers. The chosen theme now sets the colours of
+  the whole window (palette, Fusion style, tab headers, table headers, menu bar, status bar and scrollbars), so the
+  dark and light themes look the same whatever Windows uses. Controls such as checkboxes and combo boxes now use the
+  Fusion style and may look slightly different from before.
+- Changed: the exe is named `iAsset Passport Designer vX.Y.Z.exe` (with spaces and the version), and so are its SHA256
+  file and the release assets. The window title shows the version too. Old download links to
+  `iAsset_Passport_Designer.exe` and `releases/latest/download/...` no longer work. The app name, saved settings and log
+  folder are unchanged.
+
 ## 0.4.0
 - The `POST /passport-tabs` payload now matches what iAsset really stores (verified against a real `GET /templates/tabs`):
   layout elements (`field_type` 2: row 10, line 1, *Actoren en rollen* 11, *Memo* 19, relations 17–27 incl.

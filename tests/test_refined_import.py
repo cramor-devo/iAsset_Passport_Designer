@@ -13,7 +13,7 @@ from passport_designer.crossref import diff_workbook, label_key
 from passport_designer.excel_export import export_workbook
 from passport_designer.layout_engine import LayoutEngine, LayoutOptions
 from passport_designer.merge_advisor import merged_tab
-from passport_designer.models import SpecModel
+from passport_designer.models import SpecModel, norm
 from passport_designer.profiles import LEGACY
 from passport_designer.refined_import import read_metadata, read_refined, split_label
 from passport_designer.spec_reader import read_spec
@@ -326,3 +326,131 @@ def test_unchanged_export_resolves_ids_and_has_empty_diff(tmp_path, wave1_spec, 
     assert legacy or any(i.code == "open-design-questions" for i in result.issues)
     diffs = dict(diff_workbook(refined, wave1_spec, engine))
     assert not diffs[refined.sheets[0].name].entries
+
+
+def test_import_detects_red_text_and_green_fill_as_verify(tmp_path, exported, wave1_spec):
+    from openpyxl.styles import Font, PatternFill
+
+    workbook = load_workbook(exported)
+    sheet = workbook["Bord"]
+    sheet["B5"].font = Font(color="FFC00000")  # rood / red
+    sheet["C5"].fill = PatternFill("solid", fgColor="FF92D050")  # groen / green
+    path = tmp_path / "marked.xlsx"
+    workbook.save(path)
+    bord = read_refined(path, wave1_spec).sheets[0]
+    first = bord.tab.sections[0].rows[0]
+    assert bord.verify == {norm(first[1].label), norm(first[2].label)}
+
+
+def test_exported_marks_round_trip_into_import(tmp_path, wave1_spec):
+    tab = LayoutEngine(wave1_spec, LayoutOptions(profile=LEGACY)).build_all()[0]
+    label = tab.sections[0].rows[0][1].label
+    path = export_workbook(
+        [tab], tmp_path / "r.xlsx", spec=wave1_spec, verify_by_tab={tab.name: {norm(label)}},
+        deleted_by_tab={tab.name: {"weg"}},
+    )
+    sheet = read_refined(path, wave1_spec).sheets[0]
+    assert sheet.verify == {norm(label)} and sheet.deleted == ["weg"]
+
+
+def norm_label(value: str) -> str:
+    return norm(split_label(value)[0])
+
+
+# --- plan 0.5.0-06: importer-verfijningen / importer refinements --------------------------------------------------
+
+
+def _v3_sheet(tmp_path, wave1_spec, edit):
+    from passport_designer.profiles import ROTTERDAM_V3
+
+    tabs = LayoutEngine(wave1_spec, LayoutOptions(profile=ROTTERDAM_V3)).build_all()
+    path = export_workbook(tabs, tmp_path / "v3.xlsx", spec=wave1_spec)
+    workbook = load_workbook(path)
+    sheet = workbook["Bord"]
+    edit(sheet)
+    metadata = workbook["_designer"]
+    workbook.remove(metadata)  # zonder metadata: heuristiek / without metadata: heuristics
+    target = tmp_path / "edited.xlsx"
+    workbook.save(target)
+    return read_refined(target, wave1_spec).sheets[0]
+
+
+def _find(sheet, text: str):
+    return next(c for row in sheet.iter_rows() for c in row if c.value == text)
+
+
+def test_margin_in_column_I_not_a_field(tmp_path, wave1_spec):
+    def edit(sheet):
+        cell = _find(sheet, "Gemeentenaam")
+        sheet.cell(row=cell.row, column=6).value = "losse opmerking"  # F, naast de lege E / F, next to the empty E
+
+    bord = _v3_sheet(tmp_path, wave1_spec, edit)
+    labels = [c.label for s in bord.tab.sections for r in s.rows for c in r]
+    assert "losse opmerking" not in labels
+    locatie = next(s for s in bord.tab.sections if s.title == "Locatie informatie")
+    assert any("losse opmerking" in text for text in locatie.margin.values())
+
+
+def test_section_title_normalised_with_warning(tmp_path, wave1_spec):
+    def edit(sheet):
+        _find(sheet, "Inwinningsinformatie (Sem.Rel)").value = "Inwinningsinformatie (Sem.Rel"
+
+    bord = _v3_sheet(tmp_path, wave1_spec, edit)
+    assert "Inwinningsinformatie (Sem.Rel)" in [s.title for s in bord.tab.sections]
+    assert any("normalised to 'Inwinningsinformatie (Sem.Rel)'" in w for w in bord.warnings)
+
+
+def test_placeholder_rows_skipped(tmp_path, wave1_spec):
+    def edit(sheet):
+        cell = _find(sheet, "Gekoppeld object")
+        cell.value = "Constructieonderdelen, etc."
+        sheet.cell(row=cell.row + 1, column=1).value = "....."
+
+    bord = _v3_sheet(tmp_path, wave1_spec, edit)
+    labels = [c.label for s in bord.tab.sections for r in s.rows for c in r]
+    assert not any("etc" in label or label == "....." for label in labels)
+    assert sum("placeholder" in w for w in bord.warnings) >= 2
+
+
+def test_double_star_links_remark(tmp_path, wave1_spec):
+    def edit(sheet):
+        cell = _find(sheet, "Stroomgebied")
+        cell.value = "Stroomgebied**"
+        sheet.cell(row=cell.row, column=7).value = "** Via Bevind zich in"
+
+    bord = _v3_sheet(tmp_path, wave1_spec, edit)
+    labels = [c.label for s in bord.tab.sections for r in s.rows for c in r]
+    assert "Stroomgebied" in labels and "Stroomgebied**" not in labels
+
+
+def test_wide_row_warns(tmp_path, wave1_spec):
+    def edit(sheet):
+        cell = _find(sheet, "Gemeentenaam")
+        sheet.cell(row=cell.row, column=5).value = "Vijfde"
+        sheet.cell(row=cell.row, column=6).value = "Zesde"
+
+    bord = _v3_sheet(tmp_path, wave1_spec, edit)
+    assert any("has 6 fields; the profile allows 5." in w for w in bord.warnings)
+
+
+def _labels(sheet) -> list[list[str]]:
+    return [[label_key(c.display) for c in r] for s in sheet.tab.sections for r in s.rows]
+
+
+def test_minimal_dataset_shading_and_legend_do_not_change_import(tmp_path, wave1_spec):
+    from passport_designer.dataset_flags import MDS_COMMON, MinimalMark
+    from passport_designer.profiles import ROTTERDAM_V3
+
+    tab = LayoutEngine(wave1_spec, LayoutOptions(profile=ROTTERDAM_V3)).build_all()[0]
+    single = next(r for s in tab.sections for r in s.rows if len(r) == 1)
+    marks = {norm(single[0].label): MinimalMark((MDS_COMMON,), ("A",))}
+    legend = {f"Type {i}": "FFC000" for i in range(5)}  # 5 + 'All types' = chip alone on the final row
+    plain = export_workbook([tab], tmp_path / "plain.xlsx", spec=wave1_spec)
+    shaded = export_workbook(
+        [tab], tmp_path / "shaded.xlsx", spec=wave1_spec, minimal_by_tab={tab.name: (marks, legend)},
+    )
+    base = read_refined(plain, wave1_spec).sheets[0]
+    sheet = read_refined(shaded, wave1_spec).sheets[0]
+    assert [s.title for s in sheet.tab.sections] == [s.title for s in base.tab.sections]
+    assert _labels(sheet) == _labels(base)
+    assert sheet.tab.notes == base.tab.notes

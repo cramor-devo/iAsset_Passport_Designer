@@ -4,15 +4,15 @@ Main window: load specifications, pick a design, view the mockup and export API 
 from __future__ import annotations
 
 import copy
+import hashlib
 import logging
-import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from PyQt6.QtCore import QPoint, Qt
-from PyQt6.QtGui import QAction, QActionGroup, QCloseEvent, QFont, QGuiApplication, QKeySequence
+from PyQt6.QtCore import QPoint, Qt, QTimer
+from PyQt6.QtGui import QAction, QActionGroup, QCloseEvent, QFont, QGuiApplication, QKeySequence, QPixmap
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
     QDialog,
     QFileDialog,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QListWidget,
     QListWidgetItem,
@@ -40,15 +41,41 @@ from PyQt6.QtWidgets import (
 )
 
 from .. import APP_NAME, __version__
+from ..bulk_export import ExportJob, existing, safe_filename
 from ..crossref import TabDiff, changed_labels, diff_workbook
+from ..dataset_flags import MinimalMark, excluded_labels, minimal_labels, minimal_marks
 from ..excel_export import export_merge_report, export_workbook
 from ..field_catalog import CatalogError, FieldCatalog, load_catalog
 from ..field_map import FieldIdMap, FieldMapError
 from ..i18n import LANGUAGES, tr, translator
 from ..id_check import check_ids
 from ..layout_engine import LayoutEngine, LayoutOptions
+from ..layout_overrides import (
+    CellRef,
+    LayoutFileError,
+    LayoutRefused,
+    TabOverride,
+    add_section,
+    apply_layout,
+    apply_override,
+    deletable_labels,
+    delete_empty_row,
+    delete_fields,
+    from_json,
+    insert_row,
+    move_cell,
+    override_from_dict,
+    override_to_dict,
+    rename_section,
+    reset_layout,
+    restore_fields,
+    tab_labels,
+    toggle_verify,
+    with_capture,
+)
+from ..layout_overrides import to_json as layouts_to_json
 from ..merge_advisor import DEFAULT_THRESHOLD, MergeSuggestion, apply_merges, manual_merge_info, suggest_merges
-from ..models import PassportTab, Severity, SpecModel
+from ..models import PassportTab, SectionStyle, Severity, SpecModel, norm
 from ..payload import (
     ENDPOINT,
     PayloadOptions,
@@ -63,13 +90,16 @@ from ..refined_import import RefinedSheet, RefinedWorkbook, read_refined
 from ..settings import AppSettings, data_dir
 from ..spec_reader import SpecError, read_spec
 from .annotation_dialog import AnnotationDialog
+from .bulk_export_panel import BulkExportPanel, BulkOptions
+from .bulk_exporter import BulkExporter, ExportReport
 from .crossref_panel import CrossRefPanel
 from .id_check_dialog import IdCheckDialog
 from .merge_dialog import MergeDialog
-from .mockup import PassportMockup
+from .mockup import PassportMockup, render_tab_pixmap
+from .restore_dialog import RestoreDialog
 from .settings_dialog import PayloadSettingsDialog
 from .sheet_preview import SheetPreview
-from .theme import PALETTES, app_stylesheet
+from .theme import PALETTES, app_stylesheet, qt_palette
 from .workers import Job, run_job
 
 log = logging.getLogger(__name__)
@@ -77,7 +107,6 @@ log = logging.getLogger(__name__)
 CATALOG_LOADED, CATALOG_OTHER = "loaded", "other"
 FORMATS = ("payload.fmt_json", "payload.fmt_compact", "payload.fmt_form")
 SEVERITY_MARK = {Severity.INFO: "ℹ", Severity.WARNING: "⚠", Severity.ERROR: "⛔"}
-UNSAFE_FILENAME = re.compile(r'[<>:"/\\|?*\s]+')
 
 
 @dataclass
@@ -94,10 +123,6 @@ class ImportResult:
 
     refined: RefinedWorkbook
     diffs: list[tuple[str, TabDiff]] | None
-
-
-def safe_filename(name: str) -> str:
-    return UNSAFE_FILENAME.sub("_", name).strip("_") or "passport"
 
 
 class MainWindow(QMainWindow):
@@ -119,6 +144,19 @@ class MainWindow(QMainWindow):
         self.applied_merges: list[tuple[str, list[str]]] = []
         self._preview: PassportTab | None = None
         self.imported: RefinedWorkbook | None = None
+        # Handmatige markeringen en verwijderingen per paspoortnaam, plus een stapel om ongedaan te maken.
+        # Manual marks and deletions per passport name, plus a stack for undo.
+        self.overrides: dict[str, TabOverride] = {}
+        self._undo_stack: list[dict[str, TabOverride]] = []
+        self._redo_stack: list[dict[str, TabOverride]] = []
+        # Alle bewaarde indelingen (ook van andere profielen), sleutel 'profiel|paspoortnaam'; automatisch bewaard
+        # na 500 ms rust. / All stored layouts (other profiles too), key 'profile|passport name'; autosaved after
+        # 500 ms of rest.
+        self._layout_store: dict[str, TabOverride] = {}
+        self._save_timer = QTimer(self)
+        self._save_timer.setSingleShot(True)
+        self._save_timer.setInterval(500)
+        self._save_timer.timeout.connect(self._save_layouts)
         self.imported_sheets: list[ImportedSheet] = []
         self._busy = False
         self._actions: list[QAction] = []
@@ -157,12 +195,9 @@ class MainWindow(QMainWindow):
         self.type_combo = QComboBox()
         self.type_label.setBuddy(self.type_combo)
         self.type_combo.currentIndexChanged.connect(self._refresh_views)
-        self.flagged_check = QCheckBox()
-        self.flagged_check.setChecked(self.settings.boolean("design/only_flagged", True))
-        self.flagged_check.toggled.connect(self._on_flagged_toggled)
         left_layout.addWidget(self.filter_label)
         left_layout.addWidget(self.filter_list, 1)
-        for widget in (self.type_label, self.type_combo, self.flagged_check):
+        for widget in (self.type_label, self.type_combo):
             left_layout.addWidget(widget)
         splitter.addWidget(left)
 
@@ -171,6 +206,12 @@ class MainWindow(QMainWindow):
         self.mockup.show_extra_tabs = self.settings.boolean("view/extra_tabs", True)
         self.views.addTab(self.mockup, "")
         self.sheet_preview = SheetPreview()
+        self.sheet_preview.move_requested.connect(self._on_move_requested)
+        self.sheet_preview.insert_row_requested.connect(self._on_insert_row)
+        self.sheet_preview.delete_row_requested.connect(self._on_delete_row)
+        self.sheet_preview.add_section_requested.connect(self._on_add_section)
+        self.sheet_preview.rename_section_requested.connect(self._on_rename_section)
+        self.sheet_preview.reset_requested.connect(self._on_reset_layout)
         self.views.addTab(self.sheet_preview, "")
         self.views.addTab(self._build_payload_tab(), "")
         self.validation_list = QListWidget()
@@ -179,7 +220,35 @@ class MainWindow(QMainWindow):
         self.views.addTab(self._build_merge_tab(), "")
         self.crossref_panel = CrossRefPanel()
         self.views.addTab(self.crossref_panel, "")
-        splitter.addWidget(self.views)
+        self.bulk_panel = BulkExportPanel()
+        self.bulk_panel.set_folders(
+            self.settings.string("paths/bulk_tabs", ""), self.settings.string("paths/bulk_types", ""),
+        )
+        self.bulk_panel.folders_changed.connect(self._remember_bulk_folders)
+        self.bulk_panel.export_requested.connect(self._start_bulk_export)
+        self.bulk_panel.cancel_requested.connect(self._cancel_bulk_export)
+        self.views.addTab(self.bulk_panel, "")
+        self.views.currentChanged.connect(self._on_view_changed)
+        self._bulk: BulkExporter | None = None
+        self._bulk_folder = ""
+        # Werkbalkrij boven de weergaven met de Opnemen-schakelaar / Toolbar row above the views with the Opnemen toggle
+        self.only_included_check = QCheckBox()
+        self.only_included_check.setChecked(self.settings.boolean("design/only_flagged", True))
+        self.only_included_check.toggled.connect(self._set_only_included)
+        self.minimal_check = QCheckBox()
+        self.minimal_check.setChecked(self.settings.boolean("view/minimal_dataset", False))
+        self.minimal_check.toggled.connect(self._set_minimal)
+        toolbar_row = QHBoxLayout()
+        toolbar_row.setContentsMargins(0, 0, 0, 0)
+        toolbar_row.addWidget(self.only_included_check)
+        toolbar_row.addWidget(self.minimal_check)
+        toolbar_row.addStretch(1)
+        views_holder = QWidget()
+        views_layout = QVBoxLayout(views_holder)
+        views_layout.setContentsMargins(0, 0, 0, 0)
+        views_layout.addLayout(toolbar_row)
+        views_layout.addWidget(self.views, 1)
+        splitter.addWidget(views_holder)
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([320, 1040])
 
@@ -278,6 +347,7 @@ class MainWindow(QMainWindow):
         assert bar is not None
         self.file_menu = bar.addMenu("") or QMenu()
         self.view_menu = bar.addMenu("") or QMenu()
+        self.edit_menu = bar.addMenu("") or QMenu()
         self.settings_menu = bar.addMenu("") or QMenu()
         self.help_menu = bar.addMenu("") or QMenu()
         self.open_action = self._action("action.open", self.open_specs, QKeySequence.StandardKey.Open)
@@ -316,8 +386,20 @@ class MainWindow(QMainWindow):
         self.extra_tabs_action = self._action("action.extra_tabs", self._on_extra_tabs_toggled)
         self.extra_tabs_action.setCheckable(True)
         self.extra_tabs_action.setChecked(self.mockup.show_extra_tabs)
+        self.only_included_action = self._action("action.only_included", self._on_only_included_action, "Ctrl+Alt+O")
+        self.only_included_action.setCheckable(True)
+        self.only_included_action.setChecked(self.settings.boolean("design/only_flagged", True))
         self.view_menu.addAction(self.highlight_action)
         self.view_menu.addAction(self.extra_tabs_action)
+        self.view_menu.addAction(self.only_included_action)
+        self.minimal_action = self._action("action.minimal_dataset", self._on_minimal_action, "Ctrl+Shift+M")
+        self.minimal_action.setCheckable(True)
+        self.minimal_action.setChecked(self.settings.boolean("view/minimal_dataset", False))
+        self.view_menu.addAction(self.minimal_action)
+        self.verify_marks_action = self._action("action.verify_marks", self._on_verify_marks_toggled)
+        self.verify_marks_action.setCheckable(True)
+        self.verify_marks_action.setChecked(self.settings.boolean("view/verify_marks", True))
+        self.view_menu.addAction(self.verify_marks_action)
         self.view_menu.addSeparator()
         self.theme_menu = self.view_menu.addMenu("") or QMenu()
         self.language_menu = self.view_menu.addMenu("") or QMenu()
@@ -342,6 +424,25 @@ class MainWindow(QMainWindow):
             self.language_menu.addAction(action)
             self._language_actions[code] = action
 
+        self.mark_action = self._action("verify.mark", self.mark_verify_selected, "Ctrl+Shift+V")
+        self.delete_action = self._action("verify.delete", self.delete_selected, "Del")
+        self.delete_marked_action = self._action("verify.delete_marked", self.delete_all_marked)
+        self.restore_action = self._action("verify.restore", self.restore_dialog)
+        self.undo_action = self._action("verify.undo", self.undo_override, QKeySequence.StandardKey.Undo)
+        self.undo_action.setEnabled(False)
+        self.redo_action = self._action("layout.redo", self.redo_override, QKeySequence.StandardKey.Redo)
+        self.redo_action.setEnabled(False)
+        self.save_layout_action = self._action("layout.save", self.save_layout)
+        self.load_layout_action = self._action("layout.load", self.load_layout_dialog)
+        self.file_menu.insertAction(self.merge_selected_action, self.save_layout_action)
+        self.file_menu.insertAction(self.merge_selected_action, self.load_layout_action)
+        self.file_menu.insertSeparator(self.merge_selected_action)
+        for action in (self.mark_action, self.delete_action, self.delete_marked_action, self.restore_action):
+            self.edit_menu.addAction(action)
+        self.edit_menu.addSeparator()
+        self.edit_menu.addAction(self.undo_action)
+        self.edit_menu.addAction(self.redo_action)
+
         self.payload_settings_action = self._action("action.payload_settings", self.edit_payload_settings)
         self.settings_menu.addAction(self.payload_settings_action)
         self.profile_menu = self.settings_menu.addMenu("") or QMenu()
@@ -365,8 +466,10 @@ class MainWindow(QMainWindow):
             action.setText(tr(str(action.data())))
         self.highlight_action.setToolTip(tr("action.highlight_tip"))
         self.crossref_panel.retranslate()
+        self.bulk_panel.retranslate()
         self.file_menu.setTitle(tr("menu.file"))
         self.view_menu.setTitle(tr("menu.view"))
+        self.edit_menu.setTitle(tr("menu.edit"))
         self.settings_menu.setTitle(tr("menu.settings"))
         self.help_menu.setTitle(tr("menu.help"))
         self.theme_menu.setTitle(tr("menu.theme"))
@@ -380,9 +483,12 @@ class MainWindow(QMainWindow):
         self.type_label.setText(tr("panel.object_type"))
         if self.type_combo.count():
             self.type_combo.setItemText(0, tr("panel.all_types"))
-        self.flagged_check.setText(tr("panel.only_flagged"))
-        self.flagged_check.setToolTip(tr("panel.only_flagged_tip"))
-        tab_keys = ("tab.mockup", "tab.sheet", "tab.payload", "tab.validation", "tab.merge", "tab.crossref")
+        self.only_included_check.setText(tr("action.only_included"))
+        self.only_included_check.setToolTip(tr("action.only_included_tip"))
+        self.minimal_check.setText(tr("action.minimal_dataset").replace("&", ""))
+        tab_keys = (
+            "tab.mockup", "tab.sheet", "tab.payload", "tab.validation", "tab.merge", "tab.crossref",
+            "tab.bulk_export")
         for index, key in enumerate(tab_keys):
             self.views.setTabText(index, tr(key))
         self.threshold_label.setText(tr("merge.threshold"))
@@ -414,9 +520,16 @@ class MainWindow(QMainWindow):
     # --- thema en taal / theme and language ------------------------------------------------------------------
 
     def _apply_theme(self) -> None:
+        """Het gekozen thema wint van de Windows-modus: palet, kleurenschema en stijlblad. / The chosen theme wins
+        over the Windows mode: palette, colour scheme and stylesheet."""
         app = QApplication.instance()
         if isinstance(app, QApplication):
-            app.setStyleSheet(app_stylesheet(PALETTES[self.theme_name]))
+            palette = PALETTES[self.theme_name]
+            hints = app.styleHints()
+            if hints is not None and hasattr(hints, "setColorScheme"):  # Qt 6.8 en later / Qt 6.8 and later
+                hints.setColorScheme(Qt.ColorScheme.Light if palette.name == "light" else Qt.ColorScheme.Dark)
+            app.setPalette(qt_palette(palette))
+            app.setStyleSheet(app_stylesheet(palette))
 
     def _set_theme(self, name: str) -> None:
         self.theme_name = name
@@ -425,8 +538,12 @@ class MainWindow(QMainWindow):
         self._refresh_views()
 
     def _set_profile(self, key: str) -> None:
+        self._flush_layouts()  # de indeling hoort bij het profiel / the layout belongs to the profile
         self.profile = PROFILES[key]
         self.settings.set("design/profile", key)
+        if self.spec is not None:
+            self._reset_overrides()
+            self._load_layouts()
         self._rebuild_designs()
 
     def _set_language(self, code: str) -> None:
@@ -475,13 +592,17 @@ class MainWindow(QMainWindow):
     def _on_loaded(self, loaded: SpecModel, file_count: int, replace: bool) -> None:
         self._busy = False
         if replace or self.spec is None:
+            self._flush_layouts()
             self.spec = loaded
             self.applied_merges.clear()
+            self._reset_overrides()
         else:
             self.spec.merge(loaded)
         self.spec.filter_column = self.spec.resolve_filter_column(
             self.spec.filter_column or self.settings.string("design/filter_column", ""),
         )
+        if replace:
+            self._load_layouts()
         self._populate_columns()
         self._rebuild_designs()
         self.statusBar().showMessage(
@@ -715,6 +836,12 @@ class MainWindow(QMainWindow):
         self.imported_sheets = [ImportedSheet(sheet, diffs.get(sheet.name)) for sheet in refined.sheets]
         self.tabs = [entry.sheet.tab for entry in self.imported_sheets]
         self._preview = None
+        self._flush_layouts()
+        self._reset_overrides()
+        for entry in self.imported_sheets:
+            restored = self._imported_override(entry.sheet)
+            if restored is not None:
+                self.overrides[entry.sheet.tab.name] = restored
         self.back_action.setEnabled(True)
         self._update_merge_state()
         self._fill_filter_list()
@@ -739,8 +866,11 @@ class MainWindow(QMainWindow):
         """Terug naar het uit de specificatie gegenereerde ontwerp. / Back to the design generated from the spec."""
         if self.imported is None:
             return
+        self._flush_layouts()
         self._clear_import()
+        self._reset_overrides()
         if self.spec is not None:
+            self._load_layouts()
             self._rebuild_designs()
         else:
             self.tabs = []
@@ -775,7 +905,8 @@ class MainWindow(QMainWindow):
         return True
 
     def _update_title(self) -> None:
-        title = tr("app.title")
+        # NL: Titel met versie, bv. "... v0.5.0 — bestand". / EN: Title with version, e.g. "... v0.5.0 — file".
+        title = f"{tr('app.title')} v{__version__}"
         if self.imported is not None:
             title += f" — {tr('import.window', name=self.imported.path.name)}"
         self.setWindowTitle(title)
@@ -876,10 +1007,377 @@ class MainWindow(QMainWindow):
     def _on_filter_column_changed(self, _index: int) -> None:
         self.set_filter_column(self.column_combo.currentText())
 
-    def _on_flagged_toggled(self, checked: bool) -> None:
+    def _on_only_included_action(self) -> None:
+        self._set_only_included(self.only_included_action.isChecked())
+
+    def _set_only_included(self, checked: bool) -> None:
+        """Zet de Opnemen-schakelaar (werkbalk en menu synchroon), bewaar de keuze en bouw de ontwerpen opnieuw.
+        Set the Opnemen toggle (toolbar and menu in sync), save the choice and rebuild the designs."""
+        for widget in (self.only_included_check, self.only_included_action):
+            widget.blockSignals(True)
+            widget.setChecked(checked)
+            widget.blockSignals(False)
         self.settings.set("design/only_flagged", checked)
         if self.spec is not None:
             self._rebuild_designs()
+        else:
+            self._refresh_views()
+
+    def _on_minimal_action(self) -> None:
+        self._set_minimal(self.minimal_action.isChecked())
+
+    def _set_minimal(self, checked: bool) -> None:
+        """Zet de schakelaar 'Minimale dataset markeren' (werkbalk en menu synchroon) en bewaar de keuze.
+        Set the 'Highlight minimal dataset' toggle (toolbar and menu in sync) and save the choice."""
+        for widget in (self.minimal_check, self.minimal_action):
+            widget.blockSignals(True)
+            widget.setChecked(checked)
+            widget.blockSignals(False)
+        self.settings.set("view/minimal_dataset", checked)
+        self._refresh_views()
+
+    def _minimal_available(self) -> bool:
+        return self.spec is not None and self.spec.has_minimal_flags
+
+    def _minimal_on(self) -> bool:
+        return self.minimal_check.isChecked() and self._minimal_available()
+
+    def _minimal_info(
+        self, tab: PassportTab | None, object_type: str = "", *, on: bool | None = None,
+    ) -> tuple[dict[str, MinimalMark], dict[str, str]]:
+        """(markeringen, legenda) voor ``tab`` als de schakelaar aan staat en de spec de kolom heeft; anders leeg.
+        (marks, legend) for ``tab`` when the toggle is on and the spec has the column; otherwise empty."""
+        wanted = self.minimal_check.isChecked() if on is None else on
+        if tab is None or self.spec is None or not wanted or not self._minimal_available():
+            return {}, {}
+        labels = minimal_labels(self.spec, tab=tab, object_type=object_type or None)
+        types = [object_type] if object_type else [o.name for o in tab.object_types]
+        return minimal_marks(labels, tab_types=types)
+
+    def _update_minimal_state(self) -> None:
+        """Zonder MinimaleDataset-kolom is de schakelaar uitgeschakeld met uitleg. / Without a MinimaleDataset column
+        the toggle is disabled with an explanation."""
+        available = self._minimal_available()
+        tip = tr("action.minimal_dataset_tip") if available else tr("minimal.unavailable")
+        for widget in (self.minimal_check, self.minimal_action):
+            widget.setEnabled(available)
+            widget.setToolTip(tip)
+
+    # --- markeren en verwijderen / marking and deleting -----------------------------------------------------
+
+    def _effective(
+        self, tab: PassportTab | None, *, keep_empty: bool = False,
+    ) -> tuple[PassportTab | None, set[str]]:
+        """Het paspoort met de gebruikersindeling en zonder verwijderde velden, plus de gemarkeerde veldnamen. Eén
+        plek voor alle uitvoer (mockup, ontwerpblad, Excel, PNG, payload). / The passport with the user layout and
+        without deleted fields, plus the marked field names. One place for all output (mockup, design sheet, Excel,
+        PNG, payload)."""
+        if tab is None:
+            return None, set()
+        return apply_override(tab, self.overrides.get(tab.name, TabOverride()), keep_empty=keep_empty)
+
+    def _single_tab(self, tab: PassportTab, object_type: str) -> PassportTab:
+        """Het paspoort voor één objecttype, met dezelfde indeling en verwijderingen. / The passport for one object
+        type, with the same layout and deletions."""
+        if self.engine is None or self.imported is not None:
+            return self._effective(tab)[0] or tab
+        single = self.engine.build_single(tab, object_type)
+        return apply_override(single, self.overrides.get(tab.name, TabOverride()))[0]
+
+    def _reset_overrides(self) -> None:
+        self.overrides.clear()
+        self._undo_stack.clear()
+        self._redo_stack.clear()
+
+    def _change_override(self, change: Callable[[TabOverride], TabOverride]) -> None:
+        """Pas het huidige paspoort aan, met een momentopname voor ongedaan maken. / Change the current passport, with
+        a snapshot for undo."""
+        tab = self.current_tab()
+        if tab is None:
+            return
+        current = self.overrides.get(tab.name, TabOverride())
+        updated = change(current)
+        if updated == current:
+            return
+        self._undo_stack.append(dict(self.overrides))
+        del self._undo_stack[:-50]
+        self._redo_stack.clear()
+        if updated.is_empty:
+            self.overrides.pop(tab.name, None)
+        else:
+            self.overrides[tab.name] = updated
+        self._schedule_save()
+        self._refresh_views()
+
+    def undo_override(self) -> None:
+        if not self._undo_stack:
+            return
+        self._redo_stack.append(dict(self.overrides))
+        self.overrides = self._undo_stack.pop()
+        self._schedule_save()
+        self._refresh_views()
+
+    def redo_override(self) -> None:
+        if not self._redo_stack:
+            return
+        self._undo_stack.append(dict(self.overrides))
+        self.overrides = self._redo_stack.pop()
+        self._schedule_save()
+        self._refresh_views()
+
+    # --- indeling: slepen en neerzetten / layout: drag and drop ----------------------------------------------
+
+    def _edit_layout(self, change: Callable[[TabOverride], TabOverride]) -> None:
+        """Pas de indeling van het getoonde paspoort aan; weigeringen komen in de statusbalk. / Change the layout of
+        the shown passport; refusals go to the status bar."""
+        tab = self.current_tab()
+        if tab is None:
+            return
+        if self.selected_object_type():
+            self.statusBar().showMessage(tr("layout.pick_all_types"))
+            return
+        displayed = self._effective(tab, keep_empty=True)[0]
+        if displayed is None:
+            return
+        base = with_capture(self.overrides.get(tab.name, TabOverride()), displayed)
+        try:
+            updated = change(base)
+        except LayoutRefused as exc:
+            self.statusBar().showMessage(tr(f"layout.{exc.code}", max=tab.profile.grid_columns))
+            return
+        if updated.layout == base.layout:
+            return
+        self._change_override(lambda _current: updated)
+
+    def _on_move_requested(self, source: object, target: object) -> None:
+        tab = self.current_tab()
+        if tab is None or not isinstance(source, CellRef) or not isinstance(target, CellRef):
+            return
+        columns = tab.profile.grid_columns
+        self._edit_layout(lambda o: move_cell(o, source=source, target=target, max_columns=columns))
+
+    def _on_insert_row(self, section: int, row: int) -> None:
+        self._edit_layout(lambda o: insert_row(o, section=section, row=row))
+
+    def _on_delete_row(self, section: int, row: int) -> None:
+        self._edit_layout(lambda o: delete_empty_row(o, section=section, row=row))
+
+    def _ask_section(self, title: str = "", *, with_style: bool = True) -> tuple[str, SectionStyle] | None:
+        """Vraag titel (en stijl) van een sectie; None bij annuleren. / Ask the title (and style) of a section; None
+        on cancel."""
+        text, ok = QInputDialog.getText(self, tr("app.title"), tr("layout.section_prompt"), text=title)
+        if not ok:
+            return None
+        style = SectionStyle.PLAIN
+        if with_style:
+            labels = [tr("layout.style_plain"), tr("layout.style_semantic")]
+            choice, ok = QInputDialog.getItem(self, tr("app.title"), tr("layout.style_prompt"), labels, 0, False)
+            if not ok:
+                return None
+            style = SectionStyle.SEMANTIC if choice == labels[1] else SectionStyle.PLAIN
+        return text, style
+
+    def _on_add_section(self, after: int) -> None:
+        if self.selected_object_type():
+            self.statusBar().showMessage(tr("layout.pick_all_types"))
+            return
+        asked = self._ask_section()
+        if asked is not None:
+            title, style = asked
+            self._edit_layout(lambda o: add_section(o, after=after, title=title, style=style))
+
+    def _on_rename_section(self, section: int) -> None:
+        shown = self._effective(self.current_tab(), keep_empty=True)[0]
+        if shown is None or self.selected_object_type() or not 0 <= section < len(shown.sections):
+            self.statusBar().showMessage(tr("layout.pick_all_types"))
+            return
+        asked = self._ask_section(shown.sections[section].title, with_style=False)
+        if asked is not None:
+            self._edit_layout(lambda o: rename_section(o, section=section, title=asked[0]))
+
+    def _on_reset_layout(self) -> None:
+        self._change_override(reset_layout)
+        self.statusBar().showMessage(tr("layout.reset_done"))
+
+    # --- indeling: bewaren / layout: persistence -------------------------------------------------------------
+
+    def _layout_key(self, tab_name: str) -> str:
+        return f"{self.profile.key}|{tab_name}"
+
+    def _layout_file(self) -> Path | None:
+        """Bestand voor de huidige specificaties (vingerafdruk = gesorteerde bronbestandsnamen). / File for the
+        current specifications (fingerprint = sorted source file names)."""
+        if self.spec is None:
+            return None
+        digest = hashlib.sha1("\n".join(sorted(self.spec.sources)).encode("utf-8")).hexdigest()[:16]
+        return self.settings.layouts_dir() / f"{digest}.json"
+
+    def _imported_override(self, sheet: RefinedSheet) -> TabOverride | None:
+        """Markeringen en indeling uit een ingelezen blad. / Marks and layout from an imported sheet."""
+        stored = TabOverride()
+        if sheet.layout:
+            try:
+                stored = override_from_dict(sheet.layout)
+            except LayoutFileError:
+                log.warning("Layout metadata of sheet %s is not usable", sheet.name)
+        verify = frozenset(sheet.verify) | stored.verify
+        result = replace(stored, verify=verify, deleted=frozenset())
+        return None if result.is_empty else result
+
+    def _load_layouts(self) -> None:
+        """Lees de bewaarde indeling bij de huidige specificaties; onleesbaar = negeren. / Read the stored layout for
+        the current specifications; unreadable = ignore."""
+        self._layout_store = {}
+        path = self._layout_file()
+        if path is not None and path.exists():
+            try:
+                self._layout_store = from_json(path.read_text(encoding="utf-8"))
+            except (OSError, LayoutFileError):
+                log.warning("Stored layout %s is not usable and is ignored", path)
+        self._apply_store()
+
+    def _apply_store(self) -> None:
+        prefix = self._layout_key("")
+        self.overrides = {k[len(prefix):]: o for k, o in self._layout_store.items() if k.startswith(prefix)}
+        self._undo_stack.clear()
+        self._redo_stack.clear()
+
+    def _schedule_save(self) -> None:
+        if self.imported is None and self.spec is not None:
+            self._save_timer.start()
+
+    def _flush_layouts(self) -> None:
+        if self._save_timer.isActive():
+            self._save_timer.stop()
+            self._save_layouts()
+
+    def _collect_store(self) -> dict[str, TabOverride]:
+        prefix = self._layout_key("")
+        store = {k: o for k, o in self._layout_store.items() if not k.startswith(prefix)}
+        store.update({self._layout_key(name): o for name, o in self.overrides.items() if not o.is_empty})
+        return store
+
+    def _save_layouts(self) -> None:
+        """Bewaar de indeling (zonder geheimen) in de app-gegevensmap. / Store the layout (no secrets) in the app data
+        folder."""
+        path = self._layout_file()
+        if path is None or self.imported is not None:
+            return
+        self._layout_store = self._collect_store()
+        try:
+            path.write_text(layouts_to_json(self._layout_store), encoding="utf-8")
+        except OSError:
+            log.exception("Cannot store the layout in %s", path)
+
+    def save_layout(self) -> None:
+        """Bestand → Indeling opslaan…: wissel de indeling uit als JSON. / Save the layout as a JSON file."""
+        if not self._require_tabs():
+            return
+        path = self._save_path("layout.save", "Layout.json", "layout.filter")
+        if path:
+            self.write_layout_file(path)
+
+    def write_layout_file(self, path: str) -> None:
+        if self._write_text(path, layouts_to_json(self._collect_store())):
+            self.statusBar().showMessage(tr("layout.saved", path=path))
+
+    def load_layout_dialog(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, tr("layout.load"), self.settings.string("paths/last", str(Path.home())), tr("layout.filter"),
+        )
+        if path:
+            self.load_layout(path)
+
+    def load_layout(self, path: str) -> None:
+        """Lees een indelingsbestand; een fout laat de huidige indeling ongemoeid. / Read a layout file; an error leaves
+        the current layout untouched."""
+        try:
+            loaded = from_json(Path(path).read_text(encoding="utf-8"))
+        except OSError as exc:
+            self._warn(tr("layout.file_error", detail=str(exc)))
+            return
+        except LayoutFileError as exc:
+            self._warn(tr("layout.file_error", detail=str(exc)))
+            return
+        self._undo_stack.append(dict(self.overrides))
+        self._redo_stack.clear()
+        self._layout_store = {**self._collect_store(), **loaded}
+        prefix = self._layout_key("")
+        self.overrides = {k[len(prefix):]: o for k, o in self._layout_store.items() if k.startswith(prefix)}
+        self._schedule_save()
+        self._refresh_views()
+        self.statusBar().showMessage(tr("layout.loaded", count=len(loaded)))
+
+    def _selected_labels(self) -> list[str]:
+        return self.sheet_preview.selected_labels()
+
+    def mark_verify_selected(self) -> None:
+        self._mark_labels(self._selected_labels())
+
+    def delete_selected(self) -> None:
+        self._delete_labels(self._selected_labels())
+
+    def _mark_labels(self, labels: list[str]) -> None:
+        self._change_override(lambda o: toggle_verify(o, labels=labels))
+
+    def _delete_labels(self, labels: list[str]) -> None:
+        tab = self.current_tab()
+        if tab is None or not labels:
+            return
+        allowed = deletable_labels(tab, labels)
+        refused = [name for key, name in tab_labels(tab).items() if key in {norm(name) for name in labels} - allowed]
+        if refused:
+            self.statusBar().showMessage(tr("verify.protected", fields=", ".join(refused)))
+        if allowed:
+            self._change_override(lambda o: delete_fields(o, labels=allowed))
+
+    def delete_all_marked(self) -> None:
+        tab = self.current_tab()
+        if tab is None:
+            return
+        override = self.overrides.get(tab.name, TabOverride())
+        present = deletable_labels(tab, override.verify & set(tab_labels(tab)))
+        if not present:
+            self.statusBar().showMessage(tr("verify.none_marked"))
+            return
+        answer = QMessageBox.question(
+            self, tr("app.title"), tr("verify.confirm", count=len(present), tab=tab.name),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel, QMessageBox.StandardButton.Cancel,
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            self._change_override(lambda o: delete_fields(o, labels=present))
+
+    def restore_dialog(self) -> None:
+        tab = self.current_tab()
+        if tab is None:
+            return
+        deleted = self.overrides.get(tab.name, TabOverride()).deleted
+        if not deleted:
+            self.statusBar().showMessage(tr("verify.nothing_deleted"))
+            return
+        names = tab_labels(tab)
+        dialog = RestoreDialog({key: names.get(key, key) for key in sorted(deleted)}, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted and dialog.chosen():
+            self._change_override(lambda o: restore_fields(o, labels=dialog.chosen()))
+
+    def _on_verify_marks_toggled(self) -> None:
+        self.settings.set("view/verify_marks", self.verify_marks_action.isChecked())
+        self._refresh_views()
+
+    def _export_overrides(self) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
+        """Gemarkeerde en verwijderde velden per paspoortnaam voor de export. / Marked and deleted fields per passport
+        name for the export."""
+        show = self.verify_marks_action.isChecked()
+        verify = {t.name: (self._effective(t)[1] if show else set()) for t in self.tabs}
+        deleted = {t.name: set(o.deleted) for t in self.tabs if (o := self.overrides.get(t.name))}
+        return verify, deleted
+
+    def _muted_labels(self, tab: PassportTab | None) -> set[str]:
+        """Genormaliseerde veldnamen met Opnemen = Nee die grijs getoond worden (alleen in de modus 'alle velden').
+        Normalised field names with Opnemen = Nee to show grey (only in the 'all fields' mode)."""
+        if tab is None or self.spec is None or self.only_included_check.isChecked():
+            return set()
+        return excluded_labels(self.spec, tab=tab)
 
     def _rebuild_designs(self) -> None:
         if self.spec is None:
@@ -888,14 +1386,18 @@ class MainWindow(QMainWindow):
             self._clear_import()
         current = self.current_tab()
         previous = current.name if current else ""
+        object_type = self.selected_object_type()
         self._preview = None
         self.engine = LayoutEngine(
-            self.spec, LayoutOptions(only_flagged=self.flagged_check.isChecked(), profile=self.profile),
+            self.spec, LayoutOptions(only_flagged=self.only_included_check.isChecked(), profile=self.profile),
         )
         base = self.engine.build_all()
         self.tabs = apply_merges(self.spec, self.engine, base, self.applied_merges)
         self._update_suggestions()
         self._fill_filter_list(previous)
+        index = self.type_combo.findData(object_type)
+        if object_type and index >= 0:  # de gekozen objecttype blijft gekozen / keep the chosen object type
+            self.type_combo.setCurrentIndex(index)
 
     def _fill_filter_list(self, previous: str = "") -> None:
         """Vul de paspoortlijst met ``self.tabs`` en kies ``previous`` (of de eerste). / Fill the passport list."""
@@ -908,6 +1410,7 @@ class MainWindow(QMainWindow):
         names = [t.name for t in self.tabs]
         self.filter_list.setCurrentRow(names.index(previous) if previous in names else 0)
         self._on_filter_changed(self.filter_list.currentRow())
+        self.bulk_panel.set_tabs(self.tabs)
 
     def current_tab(self) -> PassportTab | None:
         if self._preview is not None:
@@ -941,9 +1444,11 @@ class MainWindow(QMainWindow):
         The passport shown: for one object type without the fields that do not apply to it."""
         tab = self.current_tab()
         object_type = self.selected_object_type()
-        if tab is None or not object_type or self.engine is None or self.imported is not None:
-            return tab
-        return self.engine.build_single(tab, object_type)
+        if tab is None:
+            return None
+        if not object_type or self.engine is None or self.imported is not None:
+            return self._effective(tab, keep_empty=True)[0]
+        return self._single_tab(tab, object_type)
 
     # --- samenvoegen / merging -------------------------------------------------------------------------------
 
@@ -1112,15 +1617,26 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(tr("status.saved", path=path))
 
     def _refresh_views(self) -> None:
-        tab = self.current_tab()
+        base = self.current_tab()
+        tab, verify_all = self._effective(base)
         shown = self.preview_tab()
-        entry = self._imported_entry(tab)
+        verify = verify_all if self.verify_marks_action.isChecked() else set()
+        entry = self._imported_entry(base)
+        deleted = bool(base is not None and self.overrides.get(base.name, TabOverride()).deleted)
+        modified = deleted or bool(base is not None and self.overrides.get(base.name, TabOverride()).layout)
+        muted = self._muted_labels(shown)
+        self._update_minimal_state()
+        self.undo_action.setEnabled(bool(self._undo_stack))
+        self.redo_action.setEnabled(bool(self._redo_stack))
+        self.sheet_preview.editable = base is not None and not self.selected_object_type()
+        marks, legend = self._minimal_info(shown, self.selected_object_type())
         self.mockup.show_tab(
             shown, self.selected_object_type(), PALETTES[self.theme_name],
-            entry.sheet.column_widths if entry else None, self.current_highlights(tab),
-            entry.sheet.positions if entry else None,
+            entry.sheet.column_widths if entry and not modified else None, self.current_highlights(base),
+            entry.sheet.positions if entry and not modified else None,
+            muted=muted, minimal=marks, legend=legend, verify=verify,
         )
-        self.sheet_preview.show_tab(shown)
+        self.sheet_preview.show_tab(shown, muted=muted, minimal=marks, legend=legend, verify=verify)
         self.payload = build_tab_payload(tab, self.ids, self.options) if tab else None
         self._render_payload_text()
         self.validation_list.clear()
@@ -1133,6 +1649,24 @@ class MainWindow(QMainWindow):
         for issue in self.payload.issues:
             severity = tr(f"sev.{issue.severity.value}")
             self.validation_list.addItem(f"{SEVERITY_MARK[issue.severity]} {severity}: {issue.message}")
+        if self.spec is not None:
+            for name in self.spec.orphan_types():
+                self.validation_list.addItem(
+                    f"{SEVERITY_MARK[Severity.WARNING]} {tr('sev.warning')}: {tr('spec.orphan', name=name)}",
+                )
+        if base is not None:
+            override = self.overrides.get(base.name, TabOverride())
+            if override.layout is not None:
+                _, layout_warnings, layout_infos = apply_layout(base, override)
+                for severity, items in ((Severity.WARNING, layout_warnings), (Severity.INFO, layout_infos)):
+                    for message in items:
+                        self.validation_list.addItem(
+                            f"{SEVERITY_MARK[severity]} {tr(f'sev.{severity.value}')}: {message}",
+                        )
+            names = tab_labels(base)
+            for key in sorted(override.deleted):
+                message = tr("verify.deleted_info", field=names.get(key, key))
+                self.validation_list.addItem(f"{SEVERITY_MARK[Severity.INFO]} {tr('sev.info')}: {message}")
 
     def payload_string(self, payload: TabPayload | None = None, fmt: int | None = None) -> str:
         data = payload or self.payload
@@ -1184,7 +1718,17 @@ class MainWindow(QMainWindow):
         if not path:
             return
         try:
-            export_workbook(self.tabs, path, spec=self.spec)
+            verify, deleted = self._export_overrides()
+            export_workbook(
+                [self._effective(t)[0] or t for t in self.tabs], path, spec=self.spec,
+                only_included=self.only_included_check.isChecked(),
+                minimal_by_tab={t.name: self._minimal_info(self._effective(t)[0] or t) for t in self.tabs}
+                if self._minimal_on() else None,
+                verify_by_tab=verify, deleted_by_tab=deleted,
+                layout_by_tab={
+                    t.name: override_to_dict(o) for t in self.tabs if (o := self.overrides.get(t.name)) and o.layout
+                },
+            )
         except (OSError, ValueError) as exc:
             log.exception("Excel export failed")
             self._warn(tr("error.write", detail=str(exc)))
@@ -1202,16 +1746,112 @@ class MainWindow(QMainWindow):
         path = self._save_path("dialog.save_excel", "Paspoortinrichting per objecttype.xlsx", "dialog.filter_xlsx")
         if not path:
             return
-        engine = self.engine
-        pairs = [(engine.build_single(tab, o.name), o.name) for tab in self.tabs for o in tab.object_types]
+        verify, deleted = self._export_overrides()
+        pairs: list[tuple[PassportTab, str]] = []
+        verify_by_name: dict[str, set[str]] = {}
+        deleted_by_name: dict[str, set[str]] = {}
+        for tab in self.tabs:
+            for o in tab.object_types:
+                single = self._single_tab(tab, o.name)
+                pairs.append((single, o.name))
+                verify_by_name[o.name] = verify.get(tab.name, set()) & set(tab_labels(single))
+                deleted_by_name[o.name] = deleted.get(tab.name, set())
         try:
-            export_workbook([tab for tab, _ in pairs], path, [name for _, name in pairs], spec=self.spec)
+            export_workbook(
+                [tab for tab, _ in pairs], path, [name for _, name in pairs], spec=self.spec,
+                only_included=self.only_included_check.isChecked(),
+                minimal_by_tab=(
+                    {o.name: self._minimal_info(tab, o.name) for tab in self.tabs for o in tab.object_types}
+                    if self._minimal_on() else None
+                ),
+                verify_by_tab=verify_by_name, deleted_by_tab=deleted_by_name,
+            )
         except (OSError, ValueError) as exc:
             log.exception("Excel export failed")
             self._warn(tr("error.write", detail=str(exc)))
             return
         self.statusBar().showMessage(tr("status.saved", path=path))
 
+    # --- bulk-export van PNG's / bulk PNG export ---------------------------------------------------------------
+
+    def _on_view_changed(self, _index: int) -> None:
+        """Bij het openen van het tabblad Bulkexport: opties volgen de huidige weergave. / On opening the Bulk
+        export tab: options follow the current view."""
+        if self.views.currentWidget() is self.bulk_panel and self._bulk is None:
+            self.bulk_panel.set_options(
+                dark=self.theme_name == "dark", only_included=self.only_included_check.isChecked(),
+                minimal=self.minimal_check.isChecked(), minimal_available=self._minimal_available(),
+                verify=self.verify_marks_action.isChecked(), extra_tabs=self.mockup.show_extra_tabs,
+            )
+
+    def _remember_bulk_folders(self, tab_folder: str, type_folder: str) -> None:
+        self.settings.set("paths/bulk_tabs", tab_folder)
+        self.settings.set("paths/bulk_types", type_folder)
+
+    def _bulk_renderer(self, options: BulkOptions) -> Callable[[ExportJob], QPixmap]:
+        """Een functie die één taak tekent met precies deze opties, zonder de weergave te wijzigen. De indeling,
+        verwijderingen en markeringen van de gebruiker gelden ook. / A function that draws one job with exactly
+        these options without changing the view. The user's layout, deletions and marks apply too."""
+        spec, palette = self.spec, PALETTES["dark" if options.dark else "light"]
+        if (self.engine is None or spec is None or self.imported is not None
+                or options.only_included == self.only_included_check.isChecked()):
+            engine, tabs = self.engine, self.tabs
+        else:
+            engine = LayoutEngine(spec, LayoutOptions(only_flagged=options.only_included, profile=self.profile))
+            tabs = apply_merges(spec, engine, engine.build_all(), self.applied_merges)
+        by_name = {t.name: t for t in tabs}
+
+        def render(job: ExportJob) -> QPixmap:
+            base = by_name[job.passport]
+            if job.object_type is not None and engine is not None and self.imported is None:
+                base = engine.build_single(base, job.object_type)
+            shown, marked = apply_override(base, self.overrides.get(job.passport, TabOverride()))
+            marks, legend = self._minimal_info(shown, job.object_type or "", on=options.minimal)
+            muted = excluded_labels(spec, tab=shown) if spec is not None and not options.only_included else set()
+            return render_tab_pixmap(
+                tab=shown, object_type=job.object_type, palette=palette, minimal=marks, legend=legend, muted=muted,
+                verify=marked if options.verify else set(), show_extra_tabs=options.extra_tabs,
+            )
+
+        return render
+
+    def _start_bulk_export(self, jobs: list[ExportJob], options: BulkOptions) -> None:
+        if self._bulk is not None or not jobs:
+            return
+        skipped = 0
+        clashes = existing(jobs)
+        if clashes:
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Icon.Question)
+            box.setText(tr("bulk.exists", count=len(clashes)))
+            overwrite = box.addButton(tr("bulk.overwrite_all"), QMessageBox.ButtonRole.AcceptRole)
+            skip = box.addButton(tr("bulk.skip_existing"), QMessageBox.ButtonRole.ActionRole)
+            box.addButton(tr("bulk.cancel"), QMessageBox.ButtonRole.RejectRole)
+            box.exec()
+            clicked = box.clickedButton()
+            if clicked is skip:
+                keep = [j for j in jobs if j not in clashes]
+                skipped, jobs = len(jobs) - len(keep), keep
+            elif clicked is not overwrite:
+                return
+        parents = {str(j.path.parent) for j in jobs}
+        self._bulk_folder = next(iter(parents)) if len(parents) == 1 else self.bulk_panel.tab_folder_edit.text()
+        exporter = BulkExporter(jobs, self._bulk_renderer(options), skipped=skipped, parent=self)
+        self._bulk = exporter
+        exporter.progress.connect(self.bulk_panel.show_progress)
+        exporter.finished.connect(self._bulk_finished)
+        self.bulk_panel.set_running(True)
+        exporter.start()
+
+    def _cancel_bulk_export(self) -> None:
+        if self._bulk is not None:
+            self._bulk.cancel()
+
+    def _bulk_finished(self, report: ExportReport) -> None:
+        folder = self._bulk_folder
+        self._bulk = None
+        self.bulk_panel.set_running(False)
+        self.bulk_panel.show_report(report, folder)
     def export_png(self) -> None:
         tab = self.current_tab()
         if tab is None:
@@ -1244,7 +1884,7 @@ class MainWindow(QMainWindow):
         if not folder:
             return
         for tab in self.tabs:
-            payload = build_tab_payload(tab, self.ids, self.options)
+            payload = build_tab_payload(self._effective(tab)[0] or tab, self.ids, self.options)
             target = Path(folder) / f"{safe_filename(tab.name)}.json"
             if not self._write_text(str(target), self.payload_string(payload, fmt=0)):
                 return
@@ -1271,5 +1911,6 @@ class MainWindow(QMainWindow):
         return bar if bar is not None else QStatusBar(self)
 
     def closeEvent(self, a0: QCloseEvent | None) -> None:  # noqa: N802 - Qt-naam / Qt name
+        self._flush_layouts()
         self.settings.set("ui/language", translator.language)
         super().closeEvent(a0)

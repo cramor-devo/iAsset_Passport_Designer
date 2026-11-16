@@ -19,7 +19,7 @@ De interface is beschikbaar in het Nederlands en het Engels (**Beeld → Taal**)
 
 ## Downloaden (Windows)
 
-Download `iAsset_Passport_Designer.exe` bij de nieuwste [release](../../releases). Het is één bestand en je hebt er
+Download `iAsset Passport Designer vX.Y.Z.exe` (bijvoorbeeld `iAsset Passport Designer v0.5.0.exe`) bij de nieuwste [release](../../releases). Het is één bestand en je hebt er
 geen Python voor nodig. Het programma is niet digitaal ondertekend, dus Windows SmartScreen kan bij de eerste keer
 starten een waarschuwing geven.
 
@@ -29,7 +29,8 @@ Wil je het programma zelf bouwen? Gebruik dan:
 powershell -ExecutionPolicy Bypass -File build.ps1
 ```
 
-Het resultaat komt in `dist\iAsset_Passport_Designer.exe`.
+Het resultaat komt in `dist\iAsset Passport Designer vX.Y.Z.exe`; de versie komt uit `__version__`. De venstertitel
+toont dezelfde versie.
 
 ### Een release maken
 
@@ -38,8 +39,8 @@ Lokaal bouwen is niet nodig voor een release. Zet `__version__` in `passport_des
 release `v<versie>` (zie [Ontwikkelen](#ontwikkelen)).
 
 Je kunt ook zelf een GitHub-release publiceren met tag `vX.Y.Z` (gelijk aan de versie). De workflow **Release** draait
-dan de tests op `windows-latest`, bouwt de exe met `build.ps1` en hangt `iAsset_Passport_Designer.exe` en
-`iAsset_Passport_Designer.exe.sha256` aan die release. Wil je een bestaande release opnieuw bouwen of het
+dan de tests op `windows-latest`, bouwt de exe met `build.ps1` en hangt `iAsset Passport Designer vX.Y.Z.exe` en
+`iAsset Passport Designer vX.Y.Z.exe.sha256` aan die release. Wil je een bestaande release opnieuw bouwen of het
 SHA256-bestand toevoegen, start de workflow dan handmatig (**Actions → Release → Run workflow**) met de tag.
 
 ## Installeren vanuit de broncode
@@ -55,7 +56,7 @@ Het logbestand staat in `%LOCALAPPDATA%\iAssetPassportDesigner\passport_designer
 
 ## Gebruik
 
-1. Kies **Bestand → Specificatie(s) openen…** en selecteer een of meer xlsx-bestanden. Met **Specificatie
+1. Kies **Bestand → Unafact-specificatie(s) openen…** en selecteer een of meer xlsx-bestanden. Met **Unafact-specificatie
    toevoegen…** voeg je een bestand toe aan wat al geladen is, bijvoorbeeld Wave 2 bovenop Wave 1. Elk bestand heeft
    een tabblad `Objecttypen` nodig (kolom Objecttype plus Filter, Zoekfilter of Fase; eventueel Groep) en een tabblad
    `Attributen` (kolommen Objecttype, Attribuut).
@@ -69,6 +70,31 @@ Het logbestand staat in `%LOCALAPPDATA%\iAssetPassportDesigner\passport_designer
    **Ontwerpblad** toont precies wat de Excel-export schrijft, ingedeeld zoals het paspoortinrichting-bestand: de
    titel, de objecttypen eronder, grijze (en lichtblauwe voor Sem.Rel) sectiekoppen, een lege kolom en de
    verwijzingslijst `Opmerkingen` voor velden die niet voor alle objecttypen gelden.
+   **Beeld → Alleen velden met Opnemen = "Ja"** (**Ctrl+Alt+O**, ook het vinkvakje boven de weergaven) staat standaard
+   aan en laat de velden weg die in de specificatie `Opnemen = "Nee"` hebben. Zet het uit om alle velden te zien; velden
+   met `Opnemen = "Nee"` worden dan grijs cursief getoond in de mockup, het ontwerpblad en de Excel-exports (in het blad
+   `_designer` staat dan `only_included` op `false`). De keuze wordt onthouden.
+   **Beeld → Minimale dataset markeren** (**Ctrl+Shift+M**, ook een vinkvakje boven de weergaven; standaard uit, wordt
+   onthouden; uitgeschakeld als de specificatie geen kolom `MinimaleDataset` heeft) kleurt de velden van de minimale
+   dataset: **groen** als het veld bij alle objecttypen van het paspoort in de minimale dataset zit, **de kleur van
+   dat objecttype** als het maar voor één type geldt, en **strepen** in de kleuren van die typen bij meerdere typen.
+   Onder de kop staat een legenda (de objecttypenamen in hun kleur plus *Alle typen* in groen) en de tooltip noemt de
+   typen. Zolang de schakelaar aan staat, komen de kleuren en de legenda ook in de PNG en de Excel-exports.
+   **Velden met de klant controleren:** selecteer in het tabblad Ontwerpblad velden en kies **Bewerken → Markeren:
+   controleren met klant** (**Ctrl+Shift+V**, ook in het rechtermuismenu). Ze worden rood in de weergaven, de PNG en de
+   Excel-exports (tooltip *Controleren met klant*) en blijven in de payload. **Bewerken → Veld verwijderen** (**Del**),
+   **Alle te controleren velden verwijderen** (vraagt eerst bevestiging) en **Verwijderde velden herstellen…**
+   verwijderen of herstellen velden; **Ctrl+Z** maakt de laatste wijziging ongedaan. Verwijderde velden verdwijnen uit
+   de payload, de weergaven en de exports en staan op het tabblad Validatie; velden in herhaalbare secties kunnen niet
+   verwijderd worden. **Beeld → "Controleren met klant" tonen** verbergt de rode kleur. Bij het importeren van een
+   verfijnd Excel-bestand gelden rode letters en de groene vulling `92D050` als markering. Markeringen en
+   verwijderingen worden nog niet tussen sessies onthouden.
+   **Ontwerpprofielen:** *Rotterdam v3* heeft maximaal 5 velden per rij en bevat *Gekoppelde objecten (Sem.Rel)*,
+   *Inwinningsinformatie (Sem.Rel)*, een kolom *Datum* in Memo, *Distributiegebied*/*Stroomgebied* in Locatie informatie
+   en *Beheerobjectomschrijving* in Overige informatie. Bij het importeren van een verfijnd Excel-bestand wordt tekst
+   naast het raster als opmerking gelezen, worden sectietitels genormaliseerd (met waarschuwing), plaatsaanduidingen
+   (`..., etc.`, `.....`) overgeslagen, `**` aan de opmerking gekoppeld en geeft een rij met meer dan 5 velden een
+   waarschuwing. Objecttypen met attributen maar zonder regel in Objecttypen staan op het tabblad Validatie.
 4. Het tabblad **Samenvoegadvies** stelt filters voor die samen één paspoort kunnen gebruiken. Het advies is gebaseerd
    op dezelfde beheergroep en vergelijkbare attributen (Jaccard-gelijkenis). Velden die niet voor alle objecttypen
    gelden, krijgen een voetnoot: dit zijn de velden die je in iAsset per subthema aan- of uitzet. Met **Voorbeeld
@@ -81,7 +107,7 @@ Het logbestand staat in `%LOCALAPPDATA%\iAssetPassportDesigner\passport_designer
    filter, dan toont het venster die verschillen en moet je het uitdrukkelijk bevestigen (Annuleren is de standaard).
    Een handmatige samenvoeging maak je net als andere samenvoegingen ongedaan; bij een ingelezen ontwerp is ze niet
    beschikbaar.
-5. Kies **Bestand → Veld-ID-bestand laden…** om een export van `GET /diverse-fields` te laden: de V2-paspoort-diverse-veldenlijst (bijv. `passport field list.csv`,
+5. Kies **Bestand → Paspoort-veld-ID-bestand laden…** om een export van `GET /diverse-fields` te laden: de V2-paspoort-diverse-veldenlijst (bijv. `passport field list.csv`,
    CSV met puntkomma `id;label;name;type;values;…`; JSON en xlsx met label/name en id werken ook). Elk paspoortveld
    krijgt de `id` van het diverse veld met dezelfde label. Het iAsset-veldencatalogus-xlsx uit de GUI (met de tabbladen
    `Paspoort velden` en `Thema Subthema`) werkt ook. Zonder veld-ID's krijgt `field_id` de waarde `null` en meldt het
@@ -117,6 +143,30 @@ Het logbestand staat in `%LOCALAPPDATA%\iAssetPassportDesigner\passport_designer
     regels. Opmaak en layout blijven ongewijzigd en het originele bestand verandert niet. Bevat het blad tekeningen,
     dan waarschuwt het programma.
 
+### Velden herschikken
+
+In het tabblad **Ontwerpblad** sleep je een veld naar een andere plek: in dezelfde rij, een andere rij of een andere
+sectie. Neerzetten op een sectiekop voegt het veld achteraan die sectie toe; neerzetten op een lege rij vult die. Klik
+met rechts voor **Lege rij erboven/eronder invoegen**, **Nieuwe sectie eronder…**, **Sectie hernoemen…**, **Lege rij
+verwijderen** en **Volgorde van dit paspoort herstellen**. Een rij bevat maximaal 5 velden; herhaalbare secties en
+Notes verplaats je alleen als geheel. Het ontwerpblad is leidend: de mockup, de PNG, de Excel-exports en de payload
+volgen jouw volgorde. Ongedaan maken/opnieuw: Ctrl+Z / Ctrl+Y. De indeling (met markeringen en verwijderingen) wordt
+per paspoort en specificatie bewaard; **Bestand → Indeling opslaan… / Indeling laden…** deelt die als JSON-bestand.
+Slepen kan niet zolang één objecttype is gekozen.
+
+### Bulkexport
+
+Het tabblad **Bulkexport** schrijft in één keer veel PNG-afbeeldingen. Vink paspoorten aan (één afbeelding van het hele
+paspoort, genoemd naar het tabblad, bijv. `Dragers.png`) en/of de objecttypen eronder (genoemd naar het objecttype, bijv.
+`Persleiding.png`); gebruik het filtervak, **Alles selecteren**, **Niets selecteren** en **Alles uitklappen**. Kies
+**Map voor paspoortafbeeldingen…** en **Map voor objecttype-afbeeldingen…** (wordt onthouden). Komt een naam twee keer
+voor, dan komt het paspoort tussen haakjes erachter: `Persleiding (Dragers).png`. De opties (donker/licht thema, alleen
+velden met Opnemen = "Ja", minimale dataset markeren, markeringen "controleren met klant", extra tabbladen) starten met
+de huidige weergave; wijzigen hier verandert de weergave niet. De afbeeldingen zijn gelijk aan **Mockup als PNG
+exporteren** en bevatten je indelingswijzigingen en verwijderingen. **{n} afbeeldingen exporteren** toont de voortgang;
+**Annuleren** laat de al geschreven bestanden staan. Bestaande bestanden vragen **Alles overschrijven / Bestaande
+overslaan / Annuleren**. Mislukte afbeeldingen staan in het verslag, met **Map openen**.
+
 ### Aanbevolen werkwijze
 
 1. Exporteer het Excel-ontwerp (**Bestand → Excel-ontwerp exporteren…**) en werk het uit in Excel.
@@ -128,7 +178,7 @@ Het logbestand staat in `%LOCALAPPDATA%\iAssetPassportDesigner\passport_designer
 
 | Actie | Sneltoets |
 |---|---|
-| Veld-ID-bestand laden… | Ctrl+I |
+| Paspoort-veld-ID-bestand laden… | Ctrl+I |
 | Veld-ID's controleren… | Ctrl+Shift+D |
 | Bijgewerkt Excel-ontwerp importeren… | Ctrl+Shift+I |
 | Annotaties controleren/repareren… | Ctrl+Shift+A |
@@ -136,6 +186,10 @@ Het logbestand staat in `%LOCALAPPDATA%\iAssetPassportDesigner\passport_designer
 | Excel-ontwerp exporteren… | Ctrl+E |
 | Excel-ontwerp per objecttype exporteren… | Ctrl+Shift+E |
 | Mockup als PNG exporteren… | Ctrl+P |
+| Alleen velden met Opnemen = "Ja" (menu Beeld) | Ctrl+Alt+O |
+| Minimale dataset markeren (menu Beeld) | Ctrl+Shift+M |
+| Markeren: controleren met klant (menu Bewerken) | Ctrl+Shift+V |
+| Veld verwijderen / Veldwijziging ongedaan maken (menu Bewerken) | Del / Ctrl+Z |
 
 ## Ontwerpprofielen
 

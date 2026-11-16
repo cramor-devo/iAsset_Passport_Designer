@@ -47,6 +47,7 @@ jobs:
         run: |
           version=$(python -c "import passport_designer as p; print(p.__version__)")
           echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "exe=dist/iAsset Passport Designer v$version.exe" >> "$GITHUB_OUTPUT"
           if gh release view "v$version" > /dev/null 2>&1; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
           else
@@ -79,5 +80,5 @@ jobs:
         shell: bash
         run: |
           tag="${{ steps.version.outputs.tag }}"
-          gh release create "$tag" dist/iAsset_Passport_Designer.exe \
+          gh release create "$tag" "${{ steps.version.outputs.exe }}" \
             --target "${{ github.sha }}" --title "iAsset Passport Designer ${tag#v}" --notes-file notes.md

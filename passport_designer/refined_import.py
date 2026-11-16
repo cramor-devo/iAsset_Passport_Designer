@@ -34,6 +34,10 @@ DEFAULT_WIDTH = 8.43
 # Alleen gebruikt voor bestanden zonder metadata. / Only used for files without metadata.
 SKIPPED_SHEETS = {norm(name) for name in (METADATA_SHEET, *REFERENCE_SHEETS.values())}
 Position = tuple[int, int]
+PLACEHOLDER = re.compile(r"^(.*,\s*etc\.?|\.{4,})$", re.IGNORECASE)  # "…, etc." en "....." / "…, etc." and "....."
+DOUBLE_STAR = re.compile(r"(?<!\*)\*\*$")  # precies twee sterretjes / exactly two asterisks
+DOUBLE_STAR_REMARK = re.compile(r"^\*\*(?!\*)")
+VERIFY_FILL = "92D050"  # groene vulling = controleren met klant / green fill = verify with customer
 
 
 @dataclass
@@ -62,7 +66,13 @@ class RefinedSheet:
     meta_key: str | None = None  # sleutel in metadata['sheets'] (kan afwijken van de bladnaam) / key in metadata
     metadata: dict[str, Any] | None = None  # blokje van dit blad uit '_designer' / this sheet's '_designer' entry
     warnings: list[str] = field(default_factory=list)
-
+    # Genormaliseerde veldnamen met rode letters of groene vulling (controleren met klant) en door de gebruiker
+    # verwijderde velden uit '_designer'. / Normalised field names with red text or green fill (verify with customer)
+    # and user-deleted fields from '_designer'.
+    verify: set[str] = field(default_factory=set)
+    deleted: list[str] = field(default_factory=list)
+    # Door de gebruiker gemaakte indeling uit '_designer' (JSON-vorm van TabOverride) / user layout from '_designer'
+    layout: dict[str, Any] | None = None
 
 @dataclass
 class RefinedWorkbook:
@@ -154,6 +164,55 @@ def _rgb(cell: Any) -> str:
     return colour.upper() if isinstance(colour, str) else ""
 
 
+def _canonical_title(heading: str, profile: DesignProfile) -> str:
+    """Canonieke sectietitel van het profiel als ``heading`` er alleen in haakjes of suffix van afwijkt
+    (bijv. 'Inwinningsinformatie (Sem.Rel' of zonder '(Sem.Rel)'); anders ``heading``.
+    Canonical section title of the profile when ``heading`` only differs in brackets or suffix (e.g.
+    'Inwinningsinformatie (Sem.Rel' or without '(Sem.Rel)'); otherwise ``heading``."""
+
+    def base(title: str) -> str:
+        return norm(title.split("(", 1)[0])
+
+    titles = [s.title for s in profile.after_object] + [r.title for r in profile.relations]
+    if heading in titles:
+        return heading
+    found = {t for t in titles if base(t) == base(heading) and base(heading)}
+    return next(iter(found)) if len(found) == 1 else heading
+
+
+def _split_remark_cells(
+    cells: list[tuple[int, str]], grid_columns: int, remark: str,
+) -> tuple[list[tuple[int, str]], str]:
+    """Tekst rechts van het raster die niet aansluit op het veld ervoor is een opmerking, geen veld.
+    Text right of the grid that does not connect to the field before it is a remark, not a field."""
+    columns = {c for c, _ in cells}
+    fields: list[tuple[int, str]] = []
+    for column, text in cells:
+        if column > grid_columns and column - 1 not in columns:
+            remark = f"{remark}; {text}" if remark else text
+        else:
+            fields.append((column, text))
+    return fields, remark
+
+
+def _is_red(rgb: object) -> bool:
+    """Rood: R >= 0xC0 en G, B <= 0x40 (ARGB of RGB). / Red: R >= 0xC0 and G, B <= 0x40 (ARGB or RGB)."""
+    if not isinstance(rgb, str) or len(rgb) < 6:
+        return False
+    try:
+        red, green, blue = (int(rgb[-6:][i:i + 2], 16) for i in (0, 2, 4))
+    except ValueError:
+        return False
+    return red >= 0xC0 and green <= 0x40 and blue <= 0x40
+
+
+def _is_verify_cell(cell: Any) -> bool:
+    """Rode letters of groene vulling ``92D050`` = controleren met klant. / Red text or green fill ``92D050`` = verify
+    with customer."""
+    colour = cell.font.color.rgb if cell.font is not None and cell.font.color is not None else None
+    return _is_red(colour) or _rgb(cell).endswith(VERIFY_FILL)
+
+
 def _is_filled(cell: Any) -> bool:
     return cell.fill is not None and cell.fill.fill_type == "solid"
 
@@ -202,9 +261,13 @@ def _section_style(title: str, colour: str, profile: DesignProfile) -> SectionSt
     return semantic_style(title)
 
 
-def _is_heading(sheet: Worksheet, row: int, grid_end: int) -> bool:
+def _is_heading(sheet: Worksheet, row: int, grid_end: int, colours: tuple[str, ...] = ()) -> bool:
+    """``colours``: als gevuld, telt alleen een sectiekleur als kop (veldarcering van de minimale dataset niet).
+    If given, only a section-band colour counts as heading (not minimal dataset field shading)."""
     first = sheet.cell(row=row, column=1)
     if not _text(first) or not _is_filled(first):
+        return False
+    if colours and not _rgb(first).endswith(colours):
         return False
     return not any(_text(sheet.cell(row=row, column=c)) for c in range(2, grid_end + 1))
 
@@ -295,8 +358,16 @@ def _read_sheet(
     pending_blank = False
     used_columns = 1
     first_row = 3 if has_header else 1
+    # Legenda van de minimale dataset (bereik uit '_designer') overslaan; kopkleuren dan strikt.
+    # Skip the minimal dataset legend (range from '_designer'); section-band colours are then strict.
+    legend = (sheet_meta or {}).get("legend_rows") or []
+    legend_rows = range(int(legend[0]), int(legend[1]) + 1) if len(legend) == 2 else range(0)
+    minimal_on = (workbook_meta or {}).get("minimal_dataset_shown") == "true"
+    strict = (GREY, profile.semantic_fill, PURPLE) if minimal_on else ()
     for row in range(first_row, sheet.max_row + 1):
-        if _is_heading(sheet, row, grid_end):
+        if row in legend_rows:
+            continue
+        if _is_heading(sheet, row, grid_end, strict):
             first = sheet.cell(row=row, column=1)
             heading = _text(first)
             notes_mode = norm(heading) == norm(SECTION_NOTES)
@@ -304,6 +375,10 @@ def _read_sheet(
             if notes_mode:
                 section = None
                 continue
+            canonical = _canonical_title(heading, profile)
+            if canonical != heading:
+                warnings.append(f"Row {row}: section title '{heading}' normalised to '{canonical}'.")
+                heading = canonical
             style = _section_style(heading, _rgb(first), profile)
             section = Section(heading, style)
             tab.sections.append(section)
@@ -312,6 +387,12 @@ def _read_sheet(
         cells = [(c, _text(sheet.cell(row=row, column=c))) for c in range(1, grid_end + 1)]
         cells = [(c, t) for c, t in cells if t]
         remark = _text(sheet.cell(row=row, column=margin)) if margin else ""
+        placeholders = [t for _, t in cells if PLACEHOLDER.match(t)]
+        if placeholders and section is not None and not notes_mode:
+            warnings.append(f"Row {row}: placeholder '{placeholders[0]}' is not a field; skipped.")
+            cells = [(c, t) for c, t in cells if not PLACEHOLDER.match(t)]
+        if margin and not notes_mode and section is not None:
+            cells, remark = _split_remark_cells(cells, profile.grid_columns, remark)
         if remark:
             _add_footnotes(remark, tab.footnotes)
         if notes_mode or section is None:
@@ -339,15 +420,22 @@ def _read_sheet(
             label, annotation, footnote = split_cell(text, profile, section.title)
             if not label.strip("*"):
                 continue
+            if DOUBLE_STAR.search(label) and DOUBLE_STAR_REMARK.match(remark.lstrip()):
+                label = label.rstrip("*")  # uitgelegd door de opmerking, geen open vraag / explained by the remark
             row_cells.append(Cell(label, footnote, annotation=annotation))
+            if _is_verify_cell(sheet.cell(row=row, column=column)):
+                result.verify.add(norm(label))
             result.positions[(section_index, row_index, len(row_cells) - 1)] = (row, column)
             result.label_positions.setdefault(norm(label.rstrip("*").strip()), (row, column))
             used_columns = max(used_columns, column)
+        if len(row_cells) > profile.grid_columns:
+            warnings.append(f"Row {row} has {len(row_cells)} fields; the profile allows {profile.grid_columns}.")
         section.rows.append(row_cells)
         if remark:
             section.margin[row_index] = remark
             assert margin is not None
-            result.margin_positions[(section_index, row_index)] = (row, margin)
+            if _text(sheet.cell(row=row, column=margin)):
+                result.margin_positions[(section_index, row_index)] = (row, margin)
     for section in tab.sections:
         section.repeater = _is_repeater(section)
     _finish(result, sheet, used_columns, margin, grid_end)
@@ -386,6 +474,10 @@ def _finish(result: RefinedSheet, sheet: Worksheet, used_columns: int, margin: i
     if margin:
         result.margin_width = _widths(sheet, margin)[-1]
     sheet_meta = result.metadata or {}
+    result.verify |= {norm(str(v)) for v in sheet_meta.get("verify", [])}
+    result.deleted = [str(v) for v in sheet_meta.get("deleted", [])]
+    raw_layout = sheet_meta.get("layout")
+    result.layout = raw_layout if isinstance(raw_layout, dict) else None
     for number, names in sheet_meta.get("footnotes", {}).items():
         tab.footnotes.setdefault(number, list(names))
     tab.footnotes = dict(sorted(tab.footnotes.items()))
