@@ -22,7 +22,7 @@
   the whole window (palette, Fusion style, tab headers, table headers, menu bar, status bar and scrollbars), so the
   dark and light themes look the same whatever Windows uses. Controls such as checkboxes and combo boxes now use the
   Fusion style and may look slightly different from before.
-- Changed: the exe is named `iAsset Passport Designer vX.Y.Z.exe` (with spaces and the version), and so are its SHA256
+- Changed: the exe is named `iAsset_Passport_Designer_vX.Y.Z.exe` (underscores instead of spaces, plus the version), and so are its SHA256
   file and the release assets. The window title shows the version too. Old download links to
   `iAsset_Passport_Designer.exe` and `releases/latest/download/...` no longer work. The app name, saved settings and log
   folder are unchanged.
