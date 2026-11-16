@@ -74,6 +74,12 @@ Het logbestand staat in `%LOCALAPPDATA%\iAssetPassportDesigner\passport_designer
    aan en laat de velden weg die in de specificatie `Opnemen = "Nee"` hebben. Zet het uit om alle velden te zien; velden
    met `Opnemen = "Nee"` worden dan grijs cursief getoond in de mockup, het ontwerpblad en de Excel-exports (in het blad
    `_designer` staat dan `only_included` op `false`). De keuze wordt onthouden.
+   **Beeld → Minimale dataset markeren** (**Ctrl+Shift+M**, ook een vinkvakje boven de weergaven; standaard uit, wordt
+   onthouden; uitgeschakeld als de specificatie geen kolom `MinimaleDataset` heeft) kleurt de velden van de minimale
+   dataset: **groen** als het veld bij alle objecttypen van het paspoort in de minimale dataset zit, **de kleur van
+   dat objecttype** als het maar voor één type geldt, en **strepen** in de kleuren van die typen bij meerdere typen.
+   Onder de kop staat een legenda (de objecttypenamen in hun kleur plus *Alle typen* in groen) en de tooltip noemt de
+   typen. Zolang de schakelaar aan staat, komen de kleuren en de legenda ook in de PNG en de Excel-exports.
 4. Het tabblad **Samenvoegadvies** stelt filters voor die samen één paspoort kunnen gebruiken. Het advies is gebaseerd
    op dezelfde beheergroep en vergelijkbare attributen (Jaccard-gelijkenis). Velden die niet voor alle objecttypen
    gelden, krijgen een voetnoot: dit zijn de velden die je in iAsset per subthema aan- of uitzet. Met **Voorbeeld
@@ -142,6 +148,7 @@ Het logbestand staat in `%LOCALAPPDATA%\iAssetPassportDesigner\passport_designer
 | Excel-ontwerp per objecttype exporteren… | Ctrl+Shift+E |
 | Mockup als PNG exporteren… | Ctrl+P |
 | Alleen velden met Opnemen = "Ja" (menu Beeld) | Ctrl+Alt+O |
+| Minimale dataset markeren (menu Beeld) | Ctrl+Shift+M |
 
 ## Ontwerpprofielen
 

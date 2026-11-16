@@ -21,11 +21,12 @@ from PyQt6.QtWidgets import (
 
 from ..compare import ELLIPSIS_CHARS
 from ..crossref import label_key
+from ..dataset_flags import MDS_COMMON, MinimalMark
 from ..i18n import tr
 from ..layout_engine import notes_section
 from ..models import Cell, PassportTab, Section, SectionStyle, norm
 from ..payload import ELEMENT_MEMO, ELEMENT_ROW, section_element
-from .theme import DARK, KIND_COLOURS, Palette
+from .theme import DARK, KIND_COLOURS, MINIMAL_ALPHA, VERIFY_TEXT, Palette
 
 EXPORT_WIDTH = 1100
 SPACER_HEIGHT = 26
@@ -72,6 +73,9 @@ class PassportMockup(QFrame):
         self._positions: dict[tuple[int, int, int], tuple[int, int]] = {}
         self._muted: set[str] = set()
         self._highlights: dict[str, str] = {}
+        self._minimal: dict[str, MinimalMark] = {}
+        self._legend: dict[str, str] = {}
+        self._verify: set[str] = set()
         self.show_extra_tabs = True
         self._root = QVBoxLayout(self)
         self._root.setContentsMargins(0, 0, 0, 0)
@@ -88,6 +92,9 @@ class PassportMockup(QFrame):
         positions: dict[tuple[int, int, int], tuple[int, int]] | None = None,
         *,
         muted: set[str] | None = None,
+        minimal: dict[str, MinimalMark] | None = None,
+        legend: dict[str, str] | None = None,
+        verify: set[str] | None = None,
     ) -> None:
         """(Her)teken de mockup. Zoals in iAsset strekt elke rij haar N kolommen over de volle breedte. Bij een
         import bepalen ``column_widths`` (Excel-tekens) en ``positions`` ((sectie, rij, cel) -> (Excel-rij,
@@ -98,8 +105,13 @@ class PassportMockup(QFrame):
         ``column_widths`` (Excel characters) and ``positions`` ((section, row, cell) -> (Excel row, column)) set the
         proportions: a cell gets the width of the Excel column it sits in; otherwise columns are equal.
         ``highlights`` maps a normalised field name to a kind of difference (outline). ``muted`` are normalised field
-        names with Opnemen = Nee: grey italic."""
+        names with Opnemen = Nee: grey italic.
+        ``minimal`` (veldnaam -> kleur(en)) kleurt velden van de minimale dataset, ``legend`` (objecttype -> kleur)
+        toont de legenda; ``verify`` zijn veldnamen met 'controleren met klant' (rode tekst).
+        ``minimal`` (field name -> colour(s)) shades minimal dataset fields, ``legend`` (object type -> colour) shows
+        the legend; ``verify`` are field names marked 'verify with customer' (red text)."""
         self._tab, self._object_type, self._palette = tab, object_type, palette
+        self._minimal, self._legend, self._verify = dict(minimal or {}), dict(legend or {}), set(verify or ())
         self._widths = [w for w in (column_widths or [])]
         self._highlights = dict(highlights or {})
         self._positions = dict(positions or {})
@@ -131,7 +143,7 @@ class PassportMockup(QFrame):
         full.show_extra_tabs = self.show_extra_tabs
         full.show_tab(
             self._tab, self._object_type, self._palette, self._widths, self._highlights, self._positions,
-            muted=self._muted,
+            muted=self._muted, minimal=self._minimal, legend=self._legend, verify=self._verify,
         )
         full.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
         full.ensurePolished()
@@ -226,6 +238,8 @@ class PassportMockup(QFrame):
         layout = QVBoxLayout(body)
         layout.setContentsMargins(22, 14, 22, 22)
         layout.setSpacing(0)
+        if self._legend:
+            layout.addWidget(self._build_legend())
         sections = list(tab.sections)
         extra = notes_section(tab)
         if extra:
@@ -236,6 +250,50 @@ class PassportMockup(QFrame):
             layout.addWidget(self._build_section(tab, section, index))
         layout.addStretch(1)
         return body
+
+    def _blend(self, tint: str, base: str) -> str:
+        """Tint (RGB zonder #) met ``MINIMAL_ALPHA`` over ``base`` gelegd, als dekkende kleur.
+        Tint (RGB without #) laid over ``base`` with ``MINIMAL_ALPHA``, as an opaque colour."""
+        top, bottom = QColor(f"#{tint}"), QColor(base if base != "transparent" else self._palette.body)
+        mixed = [round(MINIMAL_ALPHA * t + (1 - MINIMAL_ALPHA) * b) for t, b in
+                 ((top.red(), bottom.red()), (top.green(), bottom.green()), (top.blue(), bottom.blue()))]
+        return QColor(*mixed).name()
+
+    def _fill(self, cell: Cell, base: str) -> str:
+        """Achtergrond van een veld: ``base``, of de tint(en) van de minimale dataset (strepen met harde randen).
+        Background of a field: ``base``, or the minimal dataset tint(s) (hard-edged stripes)."""
+        mark = self._minimal.get(norm(cell.label))
+        if mark is None:
+            return base
+        colours = [self._blend(c, base) for c in mark.colours]
+        if len(colours) == 1:
+            return colours[0]
+        count = len(colours)
+        stops = ", ".join(
+            f"stop:{i / count:.4f} {c}, stop:{(i + 1) / count:.4f} {c}" for i, c in enumerate(colours)
+        )
+        return f"qlineargradient(x1:0, y1:0, x2:1, y2:0, {stops})"
+
+    def _build_legend(self) -> QWidget:
+        """Legenda onder de kop: elke objecttype-naam als chip in zijn kleur, plus 'Alle typen' in groen.
+        Legend under the header: each object type name as a chip in its colour, plus 'All types' in green."""
+        p = self._palette
+        holder = QWidget()
+        holder.setObjectName("mockLegend")
+        layout = QHBoxLayout(holder)
+        layout.setContentsMargins(0, 0, 0, 8)
+        layout.setSpacing(6)
+        for name, colour in [*self._legend.items(), (tr("minimal.all_types"), MDS_COMMON)]:
+            chip = QLabel(name)
+            chip.setObjectName("mockLegendChip")
+            chip.setProperty("chipColour", colour)
+            chip.setStyleSheet(
+                f"background: {self._blend(colour, p.body)}; color: {p.text}; border-radius: {RADIUS}px; "
+                "padding: 2px 8px; font-size: 8pt; font-weight: 700;",
+            )
+            layout.addWidget(chip)
+        layout.addStretch(1)
+        return holder
 
     def _separator(self) -> QWidget:
         line = QFrame()
@@ -409,7 +467,8 @@ class PassportMockup(QFrame):
             title.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
             border = KIND_COLOURS.get(colour, p.separator) if colour else p.separator
             style = (
-                f"background: transparent; color: {p.muted}; border: {2 if colour else 1}px solid {border}; "
+                f"background: {self._fill(cell, 'transparent')}; color: {p.muted}; "
+                f"border: {2 if colour else 1}px solid {border}; "
                 f"border-radius: 3px; padding: 2px 8px; font-size: 9pt;"
             )
             if cell.label.casefold().strip() in DROPDOWN_COLUMNS:
@@ -529,6 +588,11 @@ class PassportMockup(QFrame):
             tips.append(tr("mock.applies_to", types=", ".join(tab.footnotes.get(cell.footnote, []))))
         if colour:
             tips.append(tr(f"kind.{colour}"))
+        mark = self._minimal.get(norm(cell.label))
+        if mark:
+            tips.append(tr("minimal.tooltip", types=", ".join(mark.types)))
+        if norm(cell.label) in self._verify:
+            tips.append(tr("verify.tooltip"))
         return "\n".join(tips)
 
     def _head(self, tab: PassportTab, cell: Cell) -> tuple[QLabel, str, str | None]:
@@ -543,8 +607,10 @@ class PassportMockup(QFrame):
         tint = KIND_COLOURS.get(colour, "transparent") if colour else ""
         marker = f"border-bottom: 3px solid {tint};" if tint else ""
         text, style = (p.muted, "font-style: italic; ") if muted else (p.text, "")
+        if norm(cell.label) in self._verify:
+            text = VERIFY_TEXT
         head.setStyleSheet(
-            f"background: {p.header_band}; color: {text}; font-weight: 700; font-size: 8pt; {style}"
+            f"background: {self._fill(cell, p.header_band)}; color: {text}; font-weight: 700; font-size: 8pt; {style}"
             f"padding: 9px 6px; {marker}",
         )
         head.setMinimumWidth(0)
@@ -574,8 +640,10 @@ class PassportMockup(QFrame):
         outline = f"border: 2px solid {tint};" if tint else "border: none;"
         background = p.header_band if pill else p.input_bg
         text, style = (p.muted, "font-style: italic; ") if muted else (p.text, "")
+        if norm(cell.label) in self._verify:
+            text = VERIFY_TEXT
         value.setStyleSheet(
-            f"background: {background}; color: {text}; border-radius: {RADIUS}px; padding: 2px 10px; "
+            f"background: {self._fill(cell, background)}; color: {text}; border-radius: {RADIUS}px; padding: 2px 10px; "
             f"font-size: 9pt; {style}{outline}",
         )
         value.setToolTip(self._muted_tip(self._tips(tab, cell, colour), muted))

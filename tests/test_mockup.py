@@ -197,3 +197,42 @@ def test_relation_sections_render_as_tables_with_sample_rows(app):
 def test_extra_table_prefixes_still_work():
     profile = ROTTERDAM_V3.__class__(**{**ROTTERDAM_V3.__dict__, "table_sections": ("Memo", "Foo")})
     assert is_relation_table(Section("Foo bar"), profile) and not is_relation_table(Section("Basis"), profile)
+
+
+# --- Minimale dataset / Minimal dataset ----------------------------------------------------------------------
+
+from passport_designer.dataset_flags import MDS_COMMON, MinimalMark  # noqa: E402
+
+
+def _head_style(mockup: PassportMockup, text: str) -> str:
+    return next(w.styleSheet() for w in mockup.findChildren(QLabel, "mockHead") if w.text() == text)
+
+
+def test_type_shade_in_render_pixmap(tab):
+    plain, shaded = PassportMockup(scrollable=False), PassportMockup(scrollable=False)
+    plain.show_tab(tab, "", DARK)
+    marks = {"breedte": MinimalMark(("FFE699",), ("APV-bord",))}
+    shaded.show_tab(tab, "", DARK, minimal=marks, legend={"APV-bord": "FFE699"})
+    assert "background: #" in _head_style(shaded, "breedte")
+    assert _head_style(shaded, "breedte") != _head_style(plain, "breedte")
+    assert _head_style(shaded, "hoogte") == _head_style(plain, "hoogte")
+    assert shaded.render_pixmap().toImage() != plain.render_pixmap().toImage()  # render_pixmap kopieert de tint
+    tip = next(w.toolTip() for w in shaded.findChildren(QLabel, "mockHead") if w.text() == "breedte")
+    assert tip == tr("minimal.tooltip", types="APV-bord")
+
+
+def test_stripes_use_gradient(tab):
+    mockup = PassportMockup(scrollable=False)
+    mockup.show_tab(tab, "", DARK, minimal={"breedte": MinimalMark(("FFE699", "F8CBAD"), ("A", "B"))})
+    assert "qlineargradient" in _head_style(mockup, "breedte")
+
+
+def test_legend_chips_present(tab):
+    mockup = PassportMockup(scrollable=False)
+    mockup.show_tab(tab, "", DARK, legend={"APV-bord": "FFE699", "Verkeersbord": "F8CBAD"})
+    chips = [w.text() for w in mockup.findChildren(QLabel, "mockLegendChip")]
+    assert chips == ["APV-bord", "Verkeersbord", tr("minimal.all_types")]
+    colours = [w.property("chipColour") for w in mockup.findChildren(QLabel, "mockLegendChip")]
+    assert colours[-1] == MDS_COMMON
+    mockup.show_tab(tab, "", DARK)
+    assert not mockup.findChildren(QLabel, "mockLegendChip")

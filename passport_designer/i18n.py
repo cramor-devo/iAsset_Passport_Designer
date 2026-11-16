@@ -256,6 +256,19 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "nl": 'Uit: toon alle velden uit de specificatie; velden met Opnemen = "Nee" worden grijs getoond.',
     },
     "mock.not_included": {"en": 'Opnemen = Nee in the specification', "nl": 'Opnemen = Nee in de specificatie'},
+    # --- 0.5.0: minimale dataset en controleren met klant / minimal dataset and verify with customer ---
+    "action.minimal_dataset": {"en": "Highlight &minimal dataset", "nl": "&Minimale dataset markeren"},
+    "action.minimal_dataset_tip": {
+        "en": "Colour fields of the minimal dataset per object type and show a legend (also in exports).",
+        "nl": "Kleur velden van de minimale dataset per objecttype en toon een legenda (ook in exports).",
+    },
+    "minimal.tooltip": {"en": "Minimal dataset for: {types}", "nl": "Minimale dataset voor: {types}"},
+    "minimal.all_types": {"en": "All types", "nl": "Alle typen"},
+    "minimal.unavailable": {
+        "en": 'The loaded specification has no "MinimaleDataset" column.',
+        "nl": 'De geladen specificatie heeft geen kolom "MinimaleDataset".',
+    },
+    "verify.tooltip": {"en": "Verify with customer", "nl": "Controleren met klant"},
     "mock.activities": {"en": "Activities", "nl": "Activiteiten"},
     "idcheck.choose.title": {"en": "Check field IDs", "nl": "Veld-ID's controleren"},
     "idcheck.choose.text": {

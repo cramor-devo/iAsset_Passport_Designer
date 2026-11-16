@@ -4,9 +4,10 @@ Preview of the Excel design sheet (same layout and colours as the export / the p
 from __future__ import annotations
 
 from openpyxl.utils import get_column_letter
-from PyQt6.QtGui import QBrush, QColor, QFont
+from PyQt6.QtGui import QBrush, QColor, QFont, QGradient, QLinearGradient
 from PyQt6.QtWidgets import QAbstractItemView, QTableWidget, QTableWidgetItem, QWidget
 
+from ..dataset_flags import MinimalMark
 from ..excel_export import SheetCell, SheetLayout, sheet_layout
 from ..models import PassportTab
 
@@ -28,14 +29,17 @@ class SheetPreview(QTableWidget):
         self.setWordWrap(True)
         self.setStyleSheet(SHEET_STYLE)
 
-    def show_tab(self, tab: PassportTab | None, *, muted: set[str] | None = None) -> None:
+    def show_tab(
+        self, tab: PassportTab | None, *, muted: set[str] | None = None, minimal: dict[str, MinimalMark] | None = None,
+        legend: dict[str, str] | None = None, verify: set[str] | None = None,
+    ) -> None:
         self.clearSpans()
         self.clear()
         if tab is None:
             self.setRowCount(0)
             self.setColumnCount(0)
             return
-        layout = sheet_layout(tab, muted=muted)
+        layout = sheet_layout(tab, muted=muted, minimal=minimal, legend=legend, verify=verify)
         self.setRowCount(layout.row_count)
         self.setColumnCount(layout.column_count)
         self.setHorizontalHeaderLabels([get_column_letter(c) for c in range(1, layout.column_count + 1)])
@@ -45,7 +49,11 @@ class SheetPreview(QTableWidget):
         for cell in layout.cells:
             item = QTableWidgetItem(cell.value)
             item.setForeground(QBrush(QColor(f"#{cell.colour}" if cell.colour else "#000000")))
-            if cell.fill:
+            if cell.tip:
+                item.setToolTip(cell.tip)
+            if cell.fill_stops:
+                item.setBackground(QBrush(_stripes(cell.fill_stops)))
+            elif cell.fill:
                 item.setBackground(QBrush(QColor(f"#{cell.fill[-6:]}")))
             font = QFont(item.font())
             font.setBold(cell.bold)
@@ -64,6 +72,18 @@ class SheetPreview(QTableWidget):
         item = self.item(row - 1, column - 1)
         return item.text() if item is not None else ""
 
+
+
+def _stripes(colours: tuple[str, ...]) -> QLinearGradient:
+    """Strepen met harde randen (als in de Excel-export).
+    / Hard-edged stripes (as in the Excel export)."""
+    gradient = QLinearGradient(0, 0, 1, 0)
+    gradient.setCoordinateMode(QGradient.CoordinateMode.ObjectBoundingMode)
+    count = len(colours)
+    for index, colour in enumerate(colours):
+        gradient.setColorAt(index / count, QColor(f"#{colour}"))
+        gradient.setColorAt(min((index + 1) / count - 0.001, 1.0), QColor(f"#{colour}"))
+    return gradient
 
 
 def _overflow_end(cell: SheetCell, layout: SheetLayout) -> int:

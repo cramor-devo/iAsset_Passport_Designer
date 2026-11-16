@@ -41,7 +41,7 @@ from PyQt6.QtWidgets import (
 
 from .. import APP_NAME, __version__
 from ..crossref import TabDiff, changed_labels, diff_workbook
-from ..dataset_flags import excluded_labels
+from ..dataset_flags import MinimalMark, excluded_labels, minimal_labels, minimal_marks
 from ..excel_export import export_merge_report, export_workbook
 from ..field_catalog import CatalogError, FieldCatalog, load_catalog
 from ..field_map import FieldIdMap, FieldMapError
@@ -181,9 +181,13 @@ class MainWindow(QMainWindow):
         self.only_included_check = QCheckBox()
         self.only_included_check.setChecked(self.settings.boolean("design/only_flagged", True))
         self.only_included_check.toggled.connect(self._set_only_included)
+        self.minimal_check = QCheckBox()
+        self.minimal_check.setChecked(self.settings.boolean("view/minimal_dataset", False))
+        self.minimal_check.toggled.connect(self._set_minimal)
         toolbar_row = QHBoxLayout()
         toolbar_row.setContentsMargins(0, 0, 0, 0)
         toolbar_row.addWidget(self.only_included_check)
+        toolbar_row.addWidget(self.minimal_check)
         toolbar_row.addStretch(1)
         views_holder = QWidget()
         views_layout = QVBoxLayout(views_holder)
@@ -333,6 +337,10 @@ class MainWindow(QMainWindow):
         self.view_menu.addAction(self.highlight_action)
         self.view_menu.addAction(self.extra_tabs_action)
         self.view_menu.addAction(self.only_included_action)
+        self.minimal_action = self._action("action.minimal_dataset", self._on_minimal_action, "Ctrl+Shift+M")
+        self.minimal_action.setCheckable(True)
+        self.minimal_action.setChecked(self.settings.boolean("view/minimal_dataset", False))
+        self.view_menu.addAction(self.minimal_action)
         self.view_menu.addSeparator()
         self.theme_menu = self.view_menu.addMenu("") or QMenu()
         self.language_menu = self.view_menu.addMenu("") or QMenu()
@@ -397,6 +405,7 @@ class MainWindow(QMainWindow):
             self.type_combo.setItemText(0, tr("panel.all_types"))
         self.only_included_check.setText(tr("action.only_included"))
         self.only_included_check.setToolTip(tr("action.only_included_tip"))
+        self.minimal_check.setText(tr("action.minimal_dataset").replace("&", ""))
         tab_keys = ("tab.mockup", "tab.sheet", "tab.payload", "tab.validation", "tab.merge", "tab.crossref")
         for index, key in enumerate(tab_keys):
             self.views.setTabText(index, tr(key))
@@ -915,6 +924,45 @@ class MainWindow(QMainWindow):
         else:
             self._refresh_views()
 
+    def _on_minimal_action(self) -> None:
+        self._set_minimal(self.minimal_action.isChecked())
+
+    def _set_minimal(self, checked: bool) -> None:
+        """Zet de schakelaar 'Minimale dataset markeren' (werkbalk en menu synchroon) en bewaar de keuze.
+        Set the 'Highlight minimal dataset' toggle (toolbar and menu in sync) and save the choice."""
+        for widget in (self.minimal_check, self.minimal_action):
+            widget.blockSignals(True)
+            widget.setChecked(checked)
+            widget.blockSignals(False)
+        self.settings.set("view/minimal_dataset", checked)
+        self._refresh_views()
+
+    def _minimal_available(self) -> bool:
+        return self.spec is not None and self.spec.has_minimal_flags
+
+    def _minimal_on(self) -> bool:
+        return self.minimal_check.isChecked() and self._minimal_available()
+
+    def _minimal_info(
+        self, tab: PassportTab | None, object_type: str = "",
+    ) -> tuple[dict[str, MinimalMark], dict[str, str]]:
+        """(markeringen, legenda) voor ``tab`` als de schakelaar aan staat en de spec de kolom heeft; anders leeg.
+        (marks, legend) for ``tab`` when the toggle is on and the spec has the column; otherwise empty."""
+        if tab is None or self.spec is None or not self.minimal_check.isChecked() or not self._minimal_available():
+            return {}, {}
+        labels = minimal_labels(self.spec, tab=tab, object_type=object_type or None)
+        types = [object_type] if object_type else [o.name for o in tab.object_types]
+        return minimal_marks(labels, tab_types=types)
+
+    def _update_minimal_state(self) -> None:
+        """Zonder MinimaleDataset-kolom is de schakelaar uitgeschakeld met uitleg. / Without a MinimaleDataset column
+        the toggle is disabled with an explanation."""
+        available = self._minimal_available()
+        tip = tr("action.minimal_dataset_tip") if available else tr("minimal.unavailable")
+        for widget in (self.minimal_check, self.minimal_action):
+            widget.setEnabled(available)
+            widget.setToolTip(tip)
+
     def _muted_labels(self, tab: PassportTab | None) -> set[str]:
         """Genormaliseerde veldnamen met Opnemen = Nee die grijs getoond worden (alleen in de modus 'alle velden').
         Normalised field names with Opnemen = Nee to show grey (only in the 'all fields' mode)."""
@@ -1161,13 +1209,15 @@ class MainWindow(QMainWindow):
         shown = self.preview_tab()
         entry = self._imported_entry(tab)
         muted = self._muted_labels(shown)
+        self._update_minimal_state()
+        marks, legend = self._minimal_info(shown, self.selected_object_type())
         self.mockup.show_tab(
             shown, self.selected_object_type(), PALETTES[self.theme_name],
             entry.sheet.column_widths if entry else None, self.current_highlights(tab),
             entry.sheet.positions if entry else None,
-            muted=muted,
+            muted=muted, minimal=marks, legend=legend,
         )
-        self.sheet_preview.show_tab(shown, muted=muted)
+        self.sheet_preview.show_tab(shown, muted=muted, minimal=marks, legend=legend)
         self.payload = build_tab_payload(tab, self.ids, self.options) if tab else None
         self._render_payload_text()
         self.validation_list.clear()
@@ -1231,7 +1281,10 @@ class MainWindow(QMainWindow):
         if not path:
             return
         try:
-            export_workbook(self.tabs, path, spec=self.spec, only_included=self.only_included_check.isChecked())
+            export_workbook(
+                self.tabs, path, spec=self.spec, only_included=self.only_included_check.isChecked(),
+                minimal_by_tab={t.name: self._minimal_info(t) for t in self.tabs} if self._minimal_on() else None,
+            )
         except (OSError, ValueError) as exc:
             log.exception("Excel export failed")
             self._warn(tr("error.write", detail=str(exc)))
@@ -1255,6 +1308,10 @@ class MainWindow(QMainWindow):
             export_workbook(
                 [tab for tab, _ in pairs], path, [name for _, name in pairs], spec=self.spec,
                 only_included=self.only_included_check.isChecked(),
+                minimal_by_tab=(
+                    {o.name: self._minimal_info(tab, o.name) for tab in self.tabs for o in tab.object_types}
+                    if self._minimal_on() else None
+                ),
             )
         except (OSError, ValueError) as exc:
             log.exception("Excel export failed")

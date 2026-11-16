@@ -1,7 +1,10 @@
 # Changelog
 
 ## 0.5.0
-- Changed: the Opnemen toggle ("Only fields with Opnemen = Ja") is now in **View** (shortcut Ctrl+Alt+O) and as a
+- Added: **View → Highlight minimal dataset** (Ctrl+Shift+M, also a checkbox above the views, off by default). Minimal-dataset
+  fields get a green shade (all object types of the passport), the colour of their object type, or stripes (several
+  types), in the mockup, the design sheet, the PNG and the Excel exports, with a legend of the object-type colours. The
+  `_designer` sheet records `minimal_dataset_shown`. Excel stripes use a gradient fill; their rendering in Excel is unverified.- Changed: the Opnemen toggle ("Only fields with Opnemen = Ja") is now in **View** (shortcut Ctrl+Alt+O) and as a
   checkbox above the views, instead of in the left panel. With the toggle off, fields with Opnemen = Nee are shown in
   grey italic in the mockup, the design sheet and the Excel export. The `_designer` sheet records `only_included`.
 - Changed: the Opnemen and MinimaleDataset flags are read per attribute from the specification (not only for the

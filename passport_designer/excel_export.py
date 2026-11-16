@@ -1,4 +1,4 @@
-"""Exporteert paspoortontwerpen naar een Excel-ontwerpbestand (één tabblad per filter) met openpyxl.
+﻿"""Exporteert paspoortontwerpen naar een Excel-ontwerpbestand (één tabblad per filter) met openpyxl.
 Exports passport designs to an Excel design file (one sheet per filter) with openpyxl."""
 
 from __future__ import annotations
@@ -11,12 +11,15 @@ from pathlib import Path
 from typing import Any
 
 from openpyxl import Workbook
-from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.styles import Alignment, Font, GradientFill, PatternFill
+from openpyxl.styles.colors import Color
+from openpyxl.styles.fills import Stop
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
 from . import __version__
-from .dataset_flags import excluded_labels
+from .dataset_flags import MDS_COMMON, MinimalMark, excluded_labels
+from .i18n import tr
 from .layout_engine import LayoutEngine, notes_section
 from .merge_advisor import MergeSuggestion, field_matrix
 from .models import PassportTab, RawSheet, Section, SectionStyle, SpecModel, norm
@@ -24,6 +27,8 @@ from .models import PassportTab, RawSheet, Section, SectionStyle, SpecModel, nor
 GREY = "D9D9D9"
 PURPLE = "D9D2E9"
 MUTED_COLOUR = "808080"  # letterkleur voor velden met Opnemen = Nee / font colour for Opnemen = Nee fields
+VERIFY_COLOUR = "C00000"  # rode letters: controleren met klant / red text: verify with customer
+STRIPE_EDGE = 0.001
 COLUMN_WIDTH = 30
 MARGIN_WIDTH = 70
 METADATA_SHEET = "_designer"
@@ -74,6 +79,8 @@ class SheetCell:
     wrap: bool = False
     merge_to: int = 0  # laatste kolom bij samengevoegde cellen / last column of merged cells
     colour: str = ""  # letterkleur (RGB) voor "Opnemen = Nee"-velden / font colour for Opnemen = Nee fields
+    fill_stops: tuple[str, ...] = ()  # strepen (minimale dataset) / stripes (minimal dataset)
+    tip: str = ""  # tooltip in het voorbeeld / tooltip in the preview
 
 
 @dataclass
@@ -98,14 +105,23 @@ def _heading(cells: list[SheetCell], row: int, section: Section, tab: PassportTa
     cells.extend(SheetCell(row, column, fill=colour) for column in range(2, tab.profile.grid_columns + 1))
 
 
-def sheet_layout(tab: PassportTab, *, muted: set[str] | None = None) -> SheetLayout:
+def sheet_layout(
+    tab: PassportTab, *, muted: set[str] | None = None, minimal: dict[str, MinimalMark] | None = None,
+    legend: dict[str, str] | None = None, verify: set[str] | None = None,
+) -> SheetLayout:
     """Indeling van één paspoortontwerp zoals in het paspoortinrichting-bestand: titel, objecttypen eronder, secties
     met grijze/blauwe koppen, een lege kolom en de opmerkingen (verwijzingen naar objecttypen) ernaast.
     Layout of one passport design as in the passport design file: title, object types below, sections with
     grey/blue headings, an empty column and the remarks (references to object types) beside them.
     ``muted``: genormaliseerde veldnamen met Opnemen = Nee; die worden grijs cursief.
-    ``muted``: normalised field names with Opnemen = Nee; they are shown grey and italic."""
+    ``muted``: normalised field names with Opnemen = Nee; they are shown grey and italic.
+    ``minimal``: veldnaam -> kleur(en) van de minimale dataset; ``legend``: objecttype -> kleur (legenda onder
+    'Objecttypes:'). ``verify``: veldnamen met 'controleren met klant' (rode letters).
+    ``minimal``: field name -> minimal dataset colour(s); ``legend``: object type -> colour (legend under
+    'Objecttypes:'). ``verify``: field names marked 'verify with customer' (red text)."""
     muted = muted or set()
+    minimal = minimal or {}
+    verify = verify or set()
     profile = tab.profile
     columns = profile.grid_columns
     margin_column = columns + 2  # één lege kolom tussen raster en opmerkingen / one empty column before the remarks
@@ -117,6 +133,13 @@ def sheet_layout(tab: PassportTab, *, muted: set[str] | None = None) -> SheetLay
         names = ", ".join(o.name for o in tab.object_types)
         cells.append(SheetCell(2, 1, f"Objecttypes: {names}", italic=True))
         row = 4
+        if legend:
+            # Legenda: één cel per objecttype in zijn kleur, plus 'All types' in groen; 5 per rij zoals het raster.
+            # Legend: one cell per object type in its colour, plus 'All types' in green; 5 per row like the grid.
+            items = [*legend.items(), (tr("minimal.all_types"), MDS_COMMON)]
+            for index, (name, colour) in enumerate(items):
+                cells.append(SheetCell(3 + index // columns, 1 + index % columns, name, fill=colour))
+            row = 4 + (len(items) - 1) // columns
     sections = list(tab.sections)
     notes = notes_section(tab)
     if notes:
@@ -133,11 +156,23 @@ def sheet_layout(tab: PassportTab, *, muted: set[str] | None = None) -> SheetLay
             for column, cell in enumerate(row_cells, start=1):
                 bold = profile.bold_fields and not is_notes
                 merge_to = columns if is_notes and column == 1 and columns > 1 else 0
-                is_muted = not is_notes and norm(cell.label) in muted
+                key = norm(cell.label)
+                is_muted = not is_notes and key in muted
+                mark = None if is_notes else minimal.get(key)
+                is_verify = not is_notes and key in verify
+                colour = VERIFY_COLOUR if is_verify else (MUTED_COLOUR if is_muted else "")
                 cells.append(
                     SheetCell(
-                        row, column, cell.display, bold=bold, italic=is_muted, colour=MUTED_COLOUR if is_muted else "",
+                        row, column, cell.display, bold=bold, italic=is_muted, colour=colour,
                         wrap=True, merge_to=merge_to,
+                        fill=mark.colours[0] if mark and len(mark.colours) == 1 else "",
+                        fill_stops=mark.colours if mark and len(mark.colours) > 1 else (),
+                        tip="\n".join(
+                            part for part in (
+                                tr("minimal.tooltip", types=", ".join(mark.types)) if mark else "",
+                                tr("verify.tooltip") if is_verify else "",
+                            ) if part
+                        ),
                     ),
                 )
             remark = section.margin.get(row_index)
@@ -150,12 +185,31 @@ def sheet_layout(tab: PassportTab, *, muted: set[str] | None = None) -> SheetLay
     return layout
 
 
-def write_tab(sheet: Worksheet, tab: PassportTab, *, muted: set[str] | None = None) -> None:
+def gradient_fill(colours: tuple[str, ...]) -> GradientFill:
+    """Strepen met harde randen: elke kleur krijgt een gelijk deel (dubbele stops, ``STRIPE_EDGE`` ernaast omdat
+    openpyxl geen dubbele posities toestaat). Hard-edged stripes: each colour gets an equal band (doubled stops,
+    ``STRIPE_EDGE`` apart because openpyxl rejects duplicate positions)."""
+    count = len(colours)
+    stops: list[Stop] = []
+    for index, colour in enumerate(colours):
+        start = 0.0 if index == 0 else index / count + STRIPE_EDGE
+        end = 1.0 if index == count - 1 else (index + 1) / count - STRIPE_EDGE
+        stops.append(Stop(Color(rgb=f"00{colour}"), start))
+        stops.append(Stop(Color(rgb=f"00{colour}"), end))
+    return GradientFill(type="linear", degree=0, stop=stops)
+
+
+def write_tab(
+    sheet: Worksheet, tab: PassportTab, *, muted: set[str] | None = None, minimal: dict[str, MinimalMark] | None = None,
+    legend: dict[str, str] | None = None, verify: set[str] | None = None,
+) -> None:
     """Schrijf één paspoortontwerp naar een tabblad. / Write one passport design to a sheet."""
-    layout = sheet_layout(tab, muted=muted)
+    layout = sheet_layout(tab, muted=muted, minimal=minimal, legend=legend, verify=verify)
     for item in layout.cells:
         target = sheet.cell(row=item.row, column=item.column, value=item.value or None)
-        if item.fill:
+        if item.fill_stops:
+            target.fill = gradient_fill(item.fill_stops)
+        elif item.fill:
             target.fill = PatternFill("solid", fgColor=item.fill)
         if item.bold or item.italic or item.size or item.colour:
             target.font = Font(bold=item.bold, italic=item.italic, size=item.size, color=item.colour or None)
@@ -257,7 +311,8 @@ def add_reference_sheets(workbook: Workbook, spec: SpecModel, tabs: list[Passpor
 
 def write_metadata(
     workbook: Workbook, tabs: list[PassportTab], titles: list[str], spec: SpecModel | None, used: set[str],
-    reference_sheets: list[str] | None = None, *, only_included: bool = True,
+    reference_sheets: list[str] | None = None, *, only_included: bool = True, minimal_shown: bool = False,
+    verify: dict[str, set[str]] | None = None, deleted: dict[str, set[str]] | None = None,
 ) -> None:
     """Verborgen blad '_designer' met sleutel/waarde-regels (versie, profiel, bronnen, filterkolom en per ontwerpblad
     de objecttypen, samenvoeging en voetnoten als JSON). Hidden '_designer' sheet with key/value rows (version,
@@ -274,6 +329,7 @@ def write_metadata(
     sheet.append(["sources", json.dumps(spec.sources if spec else [], ensure_ascii=False)])
     sheet.append(["filter_column", spec.filter_column if spec else ""])
     sheet.append(["only_included", "true" if only_included else "false"])
+    sheet.append(["minimal_dataset_shown", "true" if minimal_shown else "false"])
     sheet.append(["generated", datetime.now().isoformat(timespec="seconds")])
     for title, tab in zip(titles, tabs, strict=True):
         info = {
@@ -282,6 +338,10 @@ def write_metadata(
             "merged_from": list(tab.merged_from),
             "footnotes": {str(n): list(names) for n, names in sorted(tab.footnotes.items())},
         }
+        if verify and verify.get(title):
+            info["verify"] = sorted(verify[title])
+        if deleted and deleted.get(title):
+            info["deleted"] = sorted(deleted[title])
         sheet.append([f"sheet:{title}", json.dumps(info, ensure_ascii=False)])
     sheet.column_dimensions["A"].width = 28
     sheet.column_dimensions["B"].width = 100
@@ -291,6 +351,8 @@ def write_metadata(
 def export_workbook(
     tabs: list[PassportTab], path: str | Path, sheet_names: list[str] | None = None, spec: SpecModel | None = None,
     *, only_included: bool = True,
+    minimal_by_tab: dict[str, tuple[dict[str, MinimalMark], dict[str, str]]] | None = None,
+    verify_by_tab: dict[str, set[str]] | None = None, deleted_by_tab: dict[str, set[str]] | None = None,
 ) -> Path:
     """Schrijf alle ontwerpen naar één xlsx-bestand; ``sheet_names`` vervangt desgewenst de tabbladnamen (bijv. per
     objecttype). Met ``spec`` komen er bronbladen bij ('Bron Objecttypen', 'Bron Attributen'); altijd komt er een
@@ -298,7 +360,11 @@ def export_workbook(
     cursief geschreven (alleen met ``spec``).
     Write all designs to one xlsx file; ``sheet_names`` optionally replaces the sheet names. With ``spec`` the
     reference sheets ('Bron Objecttypen', 'Bron Attributen') are added; a hidden '_designer' sheet always is.
-    With ``only_included=False`` fields with Opnemen = Nee are written grey and italic (only with ``spec``)."""
+    With ``only_included=False`` fields with Opnemen = Nee are written grey and italic (only with ``spec``).
+    ``minimal_by_tab`` (sleutel = bladnaam uit ``sheet_names``/tabnaam) tekent de minimale dataset en de legenda;
+    ``verify_by_tab`` rode letters; ``deleted_by_tab`` komt alleen in ``_designer``.
+    ``minimal_by_tab`` (key = sheet name from ``sheet_names``/tab name) draws the minimal dataset and legend;
+    ``verify_by_tab`` red text; ``deleted_by_tab`` is only recorded in ``_designer``."""
     if not tabs:
         raise ValueError("No passport designs to export.")
     workbook = Workbook()
@@ -309,14 +375,23 @@ def export_workbook(
     references: list[str] = []
     names = sheet_names if sheet_names is not None and len(sheet_names) == len(tabs) else [t.name for t in tabs]
     titles: list[str] = []
+    by_title_verify: dict[str, set[str]] = {}
+    by_title_deleted: dict[str, set[str]] = {}
     for tab, name in zip(tabs, names, strict=True):
         sheet = workbook.create_sheet(sheet_title(name, used))
         titles.append(sheet.title)
         muted = excluded_labels(spec, tab=tab) if spec is not None and not only_included else set()
-        write_tab(sheet, tab, muted=muted)
+        marks, legend = (minimal_by_tab or {}).get(name, ({}, {}))
+        verify = (verify_by_tab or {}).get(name, set())
+        write_tab(sheet, tab, muted=muted, minimal=marks, legend=legend, verify=verify)
+        by_title_verify[sheet.title] = verify
+        by_title_deleted[sheet.title] = (deleted_by_tab or {}).get(name, set())
     if spec is not None:
         references = add_reference_sheets(workbook, spec, tabs, used)
-    write_metadata(workbook, tabs, titles, spec, used, references, only_included=only_included)
+    write_metadata(
+        workbook, tabs, titles, spec, used, references, only_included=only_included,
+        minimal_shown=bool(minimal_by_tab), verify=by_title_verify, deleted=by_title_deleted,
+    )
     target = Path(path)
     workbook.save(target)
     return target

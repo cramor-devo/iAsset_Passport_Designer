@@ -9,7 +9,7 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from conftest import make_spec  # noqa: E402
-from PyQt6.QtCore import QSettings  # noqa: E402
+from PyQt6.QtCore import QSettings, Qt  # noqa: E402
 from PyQt6.QtGui import QColor, QPalette  # noqa: E402
 from PyQt6.QtWidgets import QApplication  # noqa: E402
 
@@ -597,3 +597,65 @@ def test_annotation_fix_runs_in_job_and_shows_warnings(window, exported_file, mo
     failing.run_fix()
     wait_for_jobs()
     assert errors and "nee" in errors[0] and failing.fix_button.isEnabled()
+
+
+def _bg(window, prefix: str):
+    item = _sheet_item(window, prefix)
+    assert item is not None
+    return item.background()
+
+
+def _flag_minimal(window, flags: dict[str, list[str]]) -> None:
+    for attribute, types in flags.items():
+        for object_type in types:
+            window.spec.flags.setdefault(object_type, {})[norm(attribute)] = AttributeFlags(minimal=True)
+
+
+def _chip_colour(window, name: str):
+    from PyQt6.QtWidgets import QLabel
+
+    chips = window.mockup.findChildren(QLabel, "mockLegendChip")
+    return next(w.property("chipColour") for w in chips if w.text() == name)
+
+
+def test_minimal_dataset_toggle_shades_sheet_and_legend(window):
+    from passport_designer.dataset_flags import MDS_COMMON
+
+    _flag_minimal(window, {"breedte": ["APV-bord", "Verkeersbord"], "APV-verordening": ["APV-bord"]})
+    window.filter_list.setCurrentRow(0)  # Bord
+    window._refresh_views()
+    assert window.minimal_check.isEnabled() and not window.minimal_check.isChecked()
+    assert _bg(window, "breedte").style() == Qt.BrushStyle.NoBrush
+    window.minimal_check.click()
+    assert window.settings.boolean("view/minimal_dataset", False) is True and window.minimal_action.isChecked()
+    assert _bg(window, "breedte").color().name() == f"#{MDS_COMMON.lower()}"
+    own = _bg(window, "APV-verordening").color().name()
+    legend_a = _bg(window, "APV-bord").color().name()
+    assert own == legend_a == f"#{_chip_colour(window, 'APV-bord').lower()}"
+    window.minimal_action.trigger()  # uit via het menu / off via the menu
+    assert not window.minimal_check.isChecked()
+    assert _bg(window, "breedte").style() == Qt.BrushStyle.NoBrush
+
+
+def test_minimal_dataset_disabled_without_column(window):
+    window.minimal_check.setChecked(True)
+    window._refresh_views()
+    assert not window.minimal_check.isEnabled() and not window.minimal_action.isEnabled()
+    assert window.minimal_action.toolTip() == 'The loaded specification has no "MinimaleDataset" column.'
+    assert _bg(window, "breedte").style() == Qt.BrushStyle.NoBrush
+
+
+def test_minimal_dataset_png_differs_on_and_off(window, tmp_path, monkeypatch):
+    from PyQt6.QtGui import QImage
+    from PyQt6.QtWidgets import QFileDialog
+
+    _flag_minimal(window, {"breedte": ["APV-bord"]})
+    window.filter_list.setCurrentRow(0)
+    images = []
+    for on in (False, True):
+        window._set_minimal(on)
+        target = tmp_path / f"{on}.png"
+        monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *a, t=target, **k: (str(t), "")))
+        window.export_png()
+        images.append(QImage(str(target)))
+    assert images[0] != images[1]

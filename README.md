@@ -72,6 +72,12 @@ The log file is stored at `%LOCALAPPDATA%\iAssetPassportDesigner\passport_design
    leaves out the fields that are `Opnemen = "Nee"` in the specification. Turn it off to see all fields; those with
    `Opnemen = "Nee"` are then shown in grey italic in the mockup, the design sheet and the Excel exports (with `only_included`
    set to `false` in the `_designer` sheet). The setting is remembered.
+   **View → Highlight minimal dataset** (**Ctrl+Shift+M**, also a checkbox above the views; off by default, remembered;
+   disabled when the specification has no `MinimaleDataset` column) shades the minimal-dataset fields: **green** when
+   the field is in the minimal dataset of all object types of the passport, **the colour of that object type** when
+   it is for one type only, and **stripes** of those types' colours for several types. A legend (the object-type names in
+   their colours plus *All types* in green) appears under the header, and the tooltip names the types. The shades and
+   legend are also written to the PNG and the Excel exports while the toggle is on.
 4. The **Merge suggestions** tab proposes filters that could share a single passport, based on the same management
    group and similar attributes (Jaccard similarity). Fields that do not apply to every object type get a footnote:
    these are the fields you switch on or off per sub-theme in iAsset. Use **Preview merged passport** to inspect a
@@ -135,6 +141,7 @@ The log file is stored at `%LOCALAPPDATA%\iAssetPassportDesigner\passport_design
 | Export Excel design per object type… | Ctrl+Shift+E |
 | Export mockup as PNG… | Ctrl+P |
 | Only fields with Opnemen = "Ja" (View menu) | Ctrl+Alt+O |
+| Highlight minimal dataset (View menu) | Ctrl+Shift+M |
 
 ## Design profiles
 

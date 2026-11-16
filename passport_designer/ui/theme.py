@@ -43,6 +43,11 @@ KIND_COLOURS: dict[str, str] = {
     "added": "#2fa84f", "moved": "#f0a500", "renamed": "#3b82f6", "not-in-spec": "#e5484d", "removed": "#8a8a8e",
 }
 
+# Dekking van de minimale-datasettint in de mockup en rode letters voor "controleren met klant".
+# Opacity of the minimal dataset tint in the mockup and red text for "verify with customer".
+MINIMAL_ALPHA = 0.35
+VERIFY_TEXT = "#e5484d"
+
 PALETTES: dict[str, Palette] = {DARK.name: DARK, LIGHT.name: LIGHT}
 
 # Tekstkleur op knoppen (licht, in beide thema's). / Button text colour (light buttons in both themes).
