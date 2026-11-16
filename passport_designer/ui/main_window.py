@@ -6,14 +6,13 @@ from __future__ import annotations
 import copy
 import hashlib
 import logging
-import re
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
 from PyQt6.QtCore import QPoint, Qt, QTimer
-from PyQt6.QtGui import QAction, QActionGroup, QCloseEvent, QFont, QGuiApplication, QKeySequence
+from PyQt6.QtGui import QAction, QActionGroup, QCloseEvent, QFont, QGuiApplication, QKeySequence, QPixmap
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -42,6 +41,7 @@ from PyQt6.QtWidgets import (
 )
 
 from .. import APP_NAME, __version__
+from ..bulk_export import ExportJob, existing, safe_filename
 from ..crossref import TabDiff, changed_labels, diff_workbook
 from ..dataset_flags import MinimalMark, excluded_labels, minimal_labels, minimal_marks
 from ..excel_export import export_merge_report, export_workbook
@@ -90,10 +90,12 @@ from ..refined_import import RefinedSheet, RefinedWorkbook, read_refined
 from ..settings import AppSettings, data_dir
 from ..spec_reader import SpecError, read_spec
 from .annotation_dialog import AnnotationDialog
+from .bulk_export_panel import BulkExportPanel, BulkOptions
+from .bulk_exporter import BulkExporter, ExportReport
 from .crossref_panel import CrossRefPanel
 from .id_check_dialog import IdCheckDialog
 from .merge_dialog import MergeDialog
-from .mockup import PassportMockup
+from .mockup import PassportMockup, render_tab_pixmap
 from .restore_dialog import RestoreDialog
 from .settings_dialog import PayloadSettingsDialog
 from .sheet_preview import SheetPreview
@@ -105,7 +107,6 @@ log = logging.getLogger(__name__)
 CATALOG_LOADED, CATALOG_OTHER = "loaded", "other"
 FORMATS = ("payload.fmt_json", "payload.fmt_compact", "payload.fmt_form")
 SEVERITY_MARK = {Severity.INFO: "ℹ", Severity.WARNING: "⚠", Severity.ERROR: "⛔"}
-UNSAFE_FILENAME = re.compile(r'[<>:"/\\|?*\s]+')
 
 
 @dataclass
@@ -122,10 +123,6 @@ class ImportResult:
 
     refined: RefinedWorkbook
     diffs: list[tuple[str, TabDiff]] | None
-
-
-def safe_filename(name: str) -> str:
-    return UNSAFE_FILENAME.sub("_", name).strip("_") or "passport"
 
 
 class MainWindow(QMainWindow):
@@ -223,6 +220,17 @@ class MainWindow(QMainWindow):
         self.views.addTab(self._build_merge_tab(), "")
         self.crossref_panel = CrossRefPanel()
         self.views.addTab(self.crossref_panel, "")
+        self.bulk_panel = BulkExportPanel()
+        self.bulk_panel.set_folders(
+            self.settings.string("paths/bulk_tabs", ""), self.settings.string("paths/bulk_types", ""),
+        )
+        self.bulk_panel.folders_changed.connect(self._remember_bulk_folders)
+        self.bulk_panel.export_requested.connect(self._start_bulk_export)
+        self.bulk_panel.cancel_requested.connect(self._cancel_bulk_export)
+        self.views.addTab(self.bulk_panel, "")
+        self.views.currentChanged.connect(self._on_view_changed)
+        self._bulk: BulkExporter | None = None
+        self._bulk_folder = ""
         # Werkbalkrij boven de weergaven met de Opnemen-schakelaar / Toolbar row above the views with the Opnemen toggle
         self.only_included_check = QCheckBox()
         self.only_included_check.setChecked(self.settings.boolean("design/only_flagged", True))
@@ -458,6 +466,7 @@ class MainWindow(QMainWindow):
             action.setText(tr(str(action.data())))
         self.highlight_action.setToolTip(tr("action.highlight_tip"))
         self.crossref_panel.retranslate()
+        self.bulk_panel.retranslate()
         self.file_menu.setTitle(tr("menu.file"))
         self.view_menu.setTitle(tr("menu.view"))
         self.edit_menu.setTitle(tr("menu.edit"))
@@ -477,7 +486,9 @@ class MainWindow(QMainWindow):
         self.only_included_check.setText(tr("action.only_included"))
         self.only_included_check.setToolTip(tr("action.only_included_tip"))
         self.minimal_check.setText(tr("action.minimal_dataset").replace("&", ""))
-        tab_keys = ("tab.mockup", "tab.sheet", "tab.payload", "tab.validation", "tab.merge", "tab.crossref")
+        tab_keys = (
+            "tab.mockup", "tab.sheet", "tab.payload", "tab.validation", "tab.merge", "tab.crossref",
+            "tab.bulk_export")
         for index, key in enumerate(tab_keys):
             self.views.setTabText(index, tr(key))
         self.threshold_label.setText(tr("merge.threshold"))
@@ -1029,11 +1040,12 @@ class MainWindow(QMainWindow):
         return self.minimal_check.isChecked() and self._minimal_available()
 
     def _minimal_info(
-        self, tab: PassportTab | None, object_type: str = "",
+        self, tab: PassportTab | None, object_type: str = "", *, on: bool | None = None,
     ) -> tuple[dict[str, MinimalMark], dict[str, str]]:
         """(markeringen, legenda) voor ``tab`` als de schakelaar aan staat en de spec de kolom heeft; anders leeg.
         (marks, legend) for ``tab`` when the toggle is on and the spec has the column; otherwise empty."""
-        if tab is None or self.spec is None or not self.minimal_check.isChecked() or not self._minimal_available():
+        wanted = self.minimal_check.isChecked() if on is None else on
+        if tab is None or self.spec is None or not wanted or not self._minimal_available():
             return {}, {}
         labels = minimal_labels(self.spec, tab=tab, object_type=object_type or None)
         types = [object_type] if object_type else [o.name for o in tab.object_types]
@@ -1395,6 +1407,7 @@ class MainWindow(QMainWindow):
         names = [t.name for t in self.tabs]
         self.filter_list.setCurrentRow(names.index(previous) if previous in names else 0)
         self._on_filter_changed(self.filter_list.currentRow())
+        self.bulk_panel.set_tabs(self.tabs)
 
     def current_tab(self) -> PassportTab | None:
         if self._preview is not None:
@@ -1756,6 +1769,86 @@ class MainWindow(QMainWindow):
             return
         self.statusBar().showMessage(tr("status.saved", path=path))
 
+    # --- bulk-export van PNG's / bulk PNG export ---------------------------------------------------------------
+
+    def _on_view_changed(self, _index: int) -> None:
+        """Bij het openen van het tabblad Bulkexport: opties volgen de huidige weergave. / On opening the Bulk
+        export tab: options follow the current view."""
+        if self.views.currentWidget() is self.bulk_panel and self._bulk is None:
+            self.bulk_panel.set_options(
+                dark=self.theme_name == "dark", only_included=self.only_included_check.isChecked(),
+                minimal=self.minimal_check.isChecked(), minimal_available=self._minimal_available(),
+                verify=self.verify_marks_action.isChecked(), extra_tabs=self.mockup.show_extra_tabs,
+            )
+
+    def _remember_bulk_folders(self, tab_folder: str, type_folder: str) -> None:
+        self.settings.set("paths/bulk_tabs", tab_folder)
+        self.settings.set("paths/bulk_types", type_folder)
+
+    def _bulk_renderer(self, options: BulkOptions) -> Callable[[ExportJob], QPixmap]:
+        """Een functie die één taak tekent met precies deze opties, zonder de weergave te wijzigen. De indeling,
+        verwijderingen en markeringen van de gebruiker gelden ook. / A function that draws one job with exactly
+        these options without changing the view. The user's layout, deletions and marks apply too."""
+        spec, palette = self.spec, PALETTES["dark" if options.dark else "light"]
+        if (self.engine is None or spec is None or self.imported is not None
+                or options.only_included == self.only_included_check.isChecked()):
+            engine, tabs = self.engine, self.tabs
+        else:
+            engine = LayoutEngine(spec, LayoutOptions(only_flagged=options.only_included, profile=self.profile))
+            tabs = apply_merges(spec, engine, engine.build_all(), self.applied_merges)
+        by_name = {t.name: t for t in tabs}
+
+        def render(job: ExportJob) -> QPixmap:
+            base = by_name[job.passport]
+            if job.object_type is not None and engine is not None and self.imported is None:
+                base = engine.build_single(base, job.object_type)
+            shown, marked = apply_override(base, self.overrides.get(job.passport, TabOverride()))
+            marks, legend = self._minimal_info(shown, job.object_type or "", on=options.minimal)
+            muted = excluded_labels(spec, tab=shown) if spec is not None and not options.only_included else set()
+            return render_tab_pixmap(
+                tab=shown, object_type=job.object_type, palette=palette, minimal=marks, legend=legend, muted=muted,
+                verify=marked if options.verify else set(), show_extra_tabs=options.extra_tabs,
+            )
+
+        return render
+
+    def _start_bulk_export(self, jobs: list[ExportJob], options: BulkOptions) -> None:
+        if self._bulk is not None or not jobs:
+            return
+        skipped = 0
+        clashes = existing(jobs)
+        if clashes:
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Icon.Question)
+            box.setText(tr("bulk.exists", count=len(clashes)))
+            overwrite = box.addButton(tr("bulk.overwrite_all"), QMessageBox.ButtonRole.AcceptRole)
+            skip = box.addButton(tr("bulk.skip_existing"), QMessageBox.ButtonRole.ActionRole)
+            box.addButton(tr("bulk.cancel"), QMessageBox.ButtonRole.RejectRole)
+            box.exec()
+            clicked = box.clickedButton()
+            if clicked is skip:
+                keep = [j for j in jobs if j not in clashes]
+                skipped, jobs = len(jobs) - len(keep), keep
+            elif clicked is not overwrite:
+                return
+        parents = {str(j.path.parent) for j in jobs}
+        self._bulk_folder = next(iter(parents)) if len(parents) == 1 else self.bulk_panel.tab_folder_edit.text()
+        exporter = BulkExporter(jobs, self._bulk_renderer(options), skipped=skipped, parent=self)
+        self._bulk = exporter
+        exporter.progress.connect(self.bulk_panel.show_progress)
+        exporter.finished.connect(self._bulk_finished)
+        self.bulk_panel.set_running(True)
+        exporter.start()
+
+    def _cancel_bulk_export(self) -> None:
+        if self._bulk is not None:
+            self._bulk.cancel()
+
+    def _bulk_finished(self, report: ExportReport) -> None:
+        folder = self._bulk_folder
+        self._bulk = None
+        self.bulk_panel.set_running(False)
+        self.bulk_panel.show_report(report, folder)
     def export_png(self) -> None:
         tab = self.current_tab()
         if tab is None:

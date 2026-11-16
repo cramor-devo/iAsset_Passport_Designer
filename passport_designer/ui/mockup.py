@@ -138,23 +138,15 @@ class PassportMockup(QFrame):
             self._root.addWidget(body)
 
     def render_pixmap(self) -> QPixmap:
-        """Volledige mockup (zonder scrollen) als afbeelding. / Full mockup (without scrolling) as an image."""
-        full = PassportMockup(scrollable=False)
-        full.show_extra_tabs = self.show_extra_tabs
-        full.show_tab(
-            self._tab, self._object_type, self._palette, self._widths, self._highlights, self._positions,
-            muted=self._muted, minimal=self._minimal, legend=self._legend, verify=self._verify,
+        """Volledige mockup (zonder scrollen) als afbeelding; dezelfde route als de bulk-export.
+        Full mockup (without scrolling) as an image; the same path as the bulk export."""
+        if self._tab is None:
+            return QPixmap()
+        return render_tab_pixmap(
+            tab=self._tab, object_type=self._object_type, palette=self._palette, minimal=self._minimal,
+            legend=self._legend, muted=self._muted, verify=self._verify, show_extra_tabs=self.show_extra_tabs,
+            column_widths=self._widths, highlights=self._highlights, positions=self._positions,
         )
-        full.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
-        full.ensurePolished()
-        layout = full.layout()
-        if layout is not None:
-            layout.activate()
-        full.resize(EXPORT_WIDTH, max(full.sizeHint().height(), 200))
-        pixmap = full.grab()
-        full.deleteLater()
-        return pixmap
-
     def row_stretch(self, section: int, row: int, cells: list[int]) -> list[int]:
         """Stretchfactoren voor de cellen ``cells`` (indices in rij ``row`` van sectie ``section``): de Excel-breedte
         van hun kolom bij een import, anders gelijk. Stretch factors for ``cells`` (indices in the row): the Excel
@@ -682,3 +674,39 @@ class PassportMockup(QFrame):
         if section.title == BASIS_SECTION and cell.label.casefold() in {"objecttype", "naam"}:
             return self._object_type
         return cell.sample
+
+
+def render_tab_pixmap(
+    *,
+    tab: PassportTab,
+    object_type: str | None,
+    palette: Palette,
+    minimal: dict[str, MinimalMark] | None = None,
+    legend: dict[str, str] | None = None,
+    muted: set[str] | None = None,
+    verify: set[str] | None = None,
+    show_extra_tabs: bool = True,
+    column_widths: list[float] | None = None,
+    highlights: dict[str, str] | None = None,
+    positions: dict[tuple[int, int, int], tuple[int, int]] | None = None,
+) -> QPixmap:
+    """Teken een paspoort buiten beeld als PNG-afbeelding, alleen met de opgegeven opties (geen venstertoestand).
+    Eén verborgen widget wordt hergebruikt, zodat honderden afbeeldingen het geheugen niet laten groeien. Alleen op
+    de GUI-thread aanroepen.
+    Draw a passport off screen as a PNG image, using only the given options (no window state). The temporary widget is
+    released at once. Call on the GUI thread only."""
+    full = PassportMockup(scrollable=False)
+    full.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
+    full.show_extra_tabs = show_extra_tabs
+    full.show_tab(
+        tab, object_type or "", palette, column_widths, highlights, positions,
+        muted=muted, minimal=minimal, legend=legend, verify=verify,
+    )
+    full.ensurePolished()
+    layout = full.layout()
+    if layout is not None:
+        layout.activate()
+    full.resize(EXPORT_WIDTH, max(full.sizeHint().height(), 200))
+    pixmap = full.grab()
+    full.deleteLater()
+    return pixmap

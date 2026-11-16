@@ -154,6 +154,19 @@ volgen jouw volgorde. Ongedaan maken/opnieuw: Ctrl+Z / Ctrl+Y. De indeling (met 
 per paspoort en specificatie bewaard; **Bestand → Indeling opslaan… / Indeling laden…** deelt die als JSON-bestand.
 Slepen kan niet zolang één objecttype is gekozen.
 
+### Bulkexport
+
+Het tabblad **Bulkexport** schrijft in één keer veel PNG-afbeeldingen. Vink paspoorten aan (één afbeelding van het hele
+paspoort, genoemd naar het tabblad, bijv. `Dragers.png`) en/of de objecttypen eronder (genoemd naar het objecttype, bijv.
+`Persleiding.png`); gebruik het filtervak, **Alles selecteren**, **Niets selecteren** en **Alles uitklappen**. Kies
+**Map voor paspoortafbeeldingen…** en **Map voor objecttype-afbeeldingen…** (wordt onthouden). Komt een naam twee keer
+voor, dan komt het paspoort tussen haakjes erachter: `Persleiding (Dragers).png`. De opties (donker/licht thema, alleen
+velden met Opnemen = "Ja", minimale dataset markeren, markeringen "controleren met klant", extra tabbladen) starten met
+de huidige weergave; wijzigen hier verandert de weergave niet. De afbeeldingen zijn gelijk aan **Mockup als PNG
+exporteren** en bevatten je indelingswijzigingen en verwijderingen. **{n} afbeeldingen exporteren** toont de voortgang;
+**Annuleren** laat de al geschreven bestanden staan. Bestaande bestanden vragen **Alles overschrijven / Bestaande
+overslaan / Annuleren**. Mislukte afbeeldingen staan in het verslag, met **Map openen**.
+
 ### Aanbevolen werkwijze
 
 1. Exporteer het Excel-ontwerp (**Bestand → Excel-ontwerp exporteren…**) en werk het uit in Excel.

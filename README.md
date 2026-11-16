@@ -145,6 +145,18 @@ sheet is leading: the mockup, the PNG, the Excel exports and the payload follow 
 The layout (with marks and deletions) is saved per passport and specification; **File → Save layout… / Load layout…**
 share it as a JSON file. Dragging is unavailable while one object type is selected.
 
+### Bulk export
+
+The **Bulk export** tab writes many PNG images at once. Tick passports (one image of the whole passport, named after the
+tab, e.g. `Dragers.png`) and/or object types below them (named after the object type, e.g. `Persleiding.png`); use the
+filter box, **Select all**, **Select none** and **Expand all**. Choose **Folder for passport images…** and **Folder for
+object type images…** (remembered). If a name occurs twice, the passport is added in brackets: `Persleiding (Dragers).png`.
+The options (dark/light theme, only fields with Opnemen = "Ja", highlight minimal dataset, "verify with customer"
+marks, extra tabs) start from the current view, and changing them here does not change the view. Images are identical to
+**Export mockup as PNG** and include your layout changes and deletions. **Export N images** shows progress; **Cancel**
+keeps the files already written. Existing files ask **Overwrite all / Skip existing / Cancel**. Failed images are listed
+in the report, with **Open folder**.
+
 ### Recommended workflow
 
 1. Export the Excel design (**File → Export Excel design…**) and refine it in Excel.
