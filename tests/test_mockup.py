@@ -144,9 +144,11 @@ def test_memo_is_a_table_with_search_boxes_and_pager(tab):
     tables = mockup.findChildren(QWidget, "mockTable")
     assert len(tables) >= 1
     table = next(t for t in tables if t.findChildren(QLabel, "mockNoData"))
-    assert [t.text() for t in table.findChildren(QLabel, "mockTableHead")] == ["Nummer", "Memo veld"]
+    assert [t.text() for t in table.findChildren(QLabel, "mockTableHead")] == ["Nummer", "Memo veld", "Datum"]
     assert all(t.alignment() & Qt.AlignmentFlag.AlignLeft for t in table.findChildren(QLabel, "mockTableHead"))
-    assert [b.text() for b in table.findChildren(QLabel, "mockSearch")] == ["Zoeken op nummer", "Zoeken op memo veld"]
+    assert [b.text() for b in table.findChildren(QLabel, "mockSearch")] == [
+        "Zoeken op nummer", "Zoeken op memo veld", "Zoeken op datum",
+    ]
     assert len(table.findChildren(QLabel, "mockTableIcon")) == 3
     assert table.findChildren(QLabel, "mockNoData")[0].text() == tr("mock.no_data")
     assert table.findChildren(QLabel, "mockPagerText")[0].text() == tr("mock.pager")

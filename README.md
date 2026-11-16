@@ -86,6 +86,12 @@ The log file is stored at `%LOCALAPPDATA%\iAssetPassportDesigner\passport_design
    tab; fields in repeatable sections cannot be deleted. **View → Show "verify with customer" marks** hides the red
    colour. Importing a refined Excel recognises red text and the green fill `92D050` as marks. Marks and deletions are
    not remembered between sessions yet.
+   **Design profiles:** *Rotterdam v3* has at most 5 fields per row and includes *Gekoppelde objecten (Sem.Rel)*,
+   *Inwinningsinformatie (Sem.Rel)*, a *Datum* column in Memo, *Distributiegebied*/*Stroomgebied* in Locatie informatie
+   and *Beheerobjectomschrijving* in Overige informatie. When importing a refined Excel, text beside the grid is read as
+   a remark, section titles are normalised (with a warning), placeholder rows (`..., etc.`, `.....`) are skipped, `**`
+   is linked to its remark and rows with more than 5 fields give a warning. Object types that have attributes but no
+   row in Objecttypen are listed on the Validation tab.
 4. The **Merge suggestions** tab proposes filters that could share a single passport, based on the same management
    group and similar attributes (Jaccard similarity). Fields that do not apply to every object type get a footnote:
    these are the fields you switch on or off per sub-theme in iAsset. Use **Preview merged passport** to inspect a

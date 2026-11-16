@@ -788,3 +788,20 @@ def test_sheet_preview_context_menu_emits_signals(window):
     menu = window.sheet_preview.context_menu(["breedte"])
     menu.actions()[0].trigger()
     assert got == [["breedte"]]
+
+
+def test_orphan_types_reported():
+    from passport_designer.models import ObjectType, SpecModel
+
+    spec = SpecModel(
+        object_types=[ObjectType("Put", "Put")],
+        attributes={"Put": ["diepte"], "Waterplanten": ["soort"], "Leeg": []},
+    )
+    assert spec.orphan_types() == ["Waterplanten"]
+
+
+def test_orphan_type_shown_in_validation_list(window):
+    window.spec.attributes["Waterplanten"] = ["soort"]
+    window._refresh_views()
+    items = [window.validation_list.item(i).text() for i in range(window.validation_list.count())]
+    assert any('Object type "Waterplanten" has attributes but no row in Objecttypen' in t for t in items)

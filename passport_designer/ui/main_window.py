@@ -1372,6 +1372,11 @@ class MainWindow(QMainWindow):
         for issue in self.payload.issues:
             severity = tr(f"sev.{issue.severity.value}")
             self.validation_list.addItem(f"{SEVERITY_MARK[issue.severity]} {severity}: {issue.message}")
+        if self.spec is not None:
+            for name in self.spec.orphan_types():
+                self.validation_list.addItem(
+                    f"{SEVERITY_MARK[Severity.WARNING]} {tr('sev.warning')}: {tr('spec.orphan', name=name)}",
+                )
         if base is not None:
             names = tab_labels(base)
             for key in sorted(self.overrides.get(base.name, TabOverride()).deleted):

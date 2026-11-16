@@ -89,6 +89,12 @@ Het logbestand staat in `%LOCALAPPDATA%\iAssetPassportDesigner\passport_designer
    verwijderd worden. **Beeld → "Controleren met klant" tonen** verbergt de rode kleur. Bij het importeren van een
    verfijnd Excel-bestand gelden rode letters en de groene vulling `92D050` als markering. Markeringen en
    verwijderingen worden nog niet tussen sessies onthouden.
+   **Ontwerpprofielen:** *Rotterdam v3* heeft maximaal 5 velden per rij en bevat *Gekoppelde objecten (Sem.Rel)*,
+   *Inwinningsinformatie (Sem.Rel)*, een kolom *Datum* in Memo, *Distributiegebied*/*Stroomgebied* in Locatie informatie
+   en *Beheerobjectomschrijving* in Overige informatie. Bij het importeren van een verfijnd Excel-bestand wordt tekst
+   naast het raster als opmerking gelezen, worden sectietitels genormaliseerd (met waarschuwing), plaatsaanduidingen
+   (`..., etc.`, `.....`) overgeslagen, `**` aan de opmerking gekoppeld en geeft een rij met meer dan 5 velden een
+   waarschuwing. Objecttypen met attributen maar zonder regel in Objecttypen staan op het tabblad Validatie.
 4. Het tabblad **Samenvoegadvies** stelt filters voor die samen één paspoort kunnen gebruiken. Het advies is gebaseerd
    op dezelfde beheergroep en vergelijkbare attributen (Jaccard-gelijkenis). Velden die niet voor alle objecttypen
    gelden, krijgen een voetnoot: dit zijn de velden die je in iAsset per subthema aan- of uitzet. Met **Voorbeeld

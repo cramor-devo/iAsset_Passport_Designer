@@ -355,3 +355,79 @@ def test_exported_marks_round_trip_into_import(tmp_path, wave1_spec):
 
 def norm_label(value: str) -> str:
     return norm(split_label(value)[0])
+
+
+# --- plan 0.5.0-06: importer-verfijningen / importer refinements --------------------------------------------------
+
+
+def _v3_sheet(tmp_path, wave1_spec, edit):
+    from passport_designer.profiles import ROTTERDAM_V3
+
+    tabs = LayoutEngine(wave1_spec, LayoutOptions(profile=ROTTERDAM_V3)).build_all()
+    path = export_workbook(tabs, tmp_path / "v3.xlsx", spec=wave1_spec)
+    workbook = load_workbook(path)
+    sheet = workbook["Bord"]
+    edit(sheet)
+    metadata = workbook["_designer"]
+    workbook.remove(metadata)  # zonder metadata: heuristiek / without metadata: heuristics
+    target = tmp_path / "edited.xlsx"
+    workbook.save(target)
+    return read_refined(target, wave1_spec).sheets[0]
+
+
+def _find(sheet, text: str):
+    return next(c for row in sheet.iter_rows() for c in row if c.value == text)
+
+
+def test_margin_in_column_I_not_a_field(tmp_path, wave1_spec):
+    def edit(sheet):
+        cell = _find(sheet, "Gemeentenaam")
+        sheet.cell(row=cell.row, column=6).value = "losse opmerking"  # F, naast de lege E / F, next to the empty E
+
+    bord = _v3_sheet(tmp_path, wave1_spec, edit)
+    labels = [c.label for s in bord.tab.sections for r in s.rows for c in r]
+    assert "losse opmerking" not in labels
+    locatie = next(s for s in bord.tab.sections if s.title == "Locatie informatie")
+    assert any("losse opmerking" in text for text in locatie.margin.values())
+
+
+def test_section_title_normalised_with_warning(tmp_path, wave1_spec):
+    def edit(sheet):
+        _find(sheet, "Inwinningsinformatie (Sem.Rel)").value = "Inwinningsinformatie (Sem.Rel"
+
+    bord = _v3_sheet(tmp_path, wave1_spec, edit)
+    assert "Inwinningsinformatie (Sem.Rel)" in [s.title for s in bord.tab.sections]
+    assert any("normalised to 'Inwinningsinformatie (Sem.Rel)'" in w for w in bord.warnings)
+
+
+def test_placeholder_rows_skipped(tmp_path, wave1_spec):
+    def edit(sheet):
+        cell = _find(sheet, "Gekoppeld object")
+        cell.value = "Constructieonderdelen, etc."
+        sheet.cell(row=cell.row + 1, column=1).value = "....."
+
+    bord = _v3_sheet(tmp_path, wave1_spec, edit)
+    labels = [c.label for s in bord.tab.sections for r in s.rows for c in r]
+    assert not any("etc" in label or label == "....." for label in labels)
+    assert sum("placeholder" in w for w in bord.warnings) >= 2
+
+
+def test_double_star_links_remark(tmp_path, wave1_spec):
+    def edit(sheet):
+        cell = _find(sheet, "Stroomgebied")
+        cell.value = "Stroomgebied**"
+        sheet.cell(row=cell.row, column=7).value = "** Via Bevind zich in"
+
+    bord = _v3_sheet(tmp_path, wave1_spec, edit)
+    labels = [c.label for s in bord.tab.sections for r in s.rows for c in r]
+    assert "Stroomgebied" in labels and "Stroomgebied**" not in labels
+
+
+def test_wide_row_warns(tmp_path, wave1_spec):
+    def edit(sheet):
+        cell = _find(sheet, "Gemeentenaam")
+        sheet.cell(row=cell.row, column=5).value = "Vijfde"
+        sheet.cell(row=cell.row, column=6).value = "Zesde"
+
+    bord = _v3_sheet(tmp_path, wave1_spec, edit)
+    assert any("has 6 fields; the profile allows 5." in w for w in bord.warnings)

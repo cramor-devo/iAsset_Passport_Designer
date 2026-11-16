@@ -99,6 +99,12 @@ class SpecModel:
                 members.append(object_type)
         return result
 
+    def orphan_types(self) -> list[str]:
+        """Objecttypen met attributen maar zonder regel in Objecttypen. / Object types with attributes but no row in
+        Objecttypen."""
+        known = {norm(o.name) for o in self.object_types}
+        return sorted((n for n, attrs in self.attributes.items() if attrs and norm(n) not in known), key=str.casefold)
+
     @property
     def has_minimal_flags(self) -> bool:
         """Heeft minstens één attribuut een MinimaleDataset-waarde? / Does any attribute have a MinimaleDataset value?

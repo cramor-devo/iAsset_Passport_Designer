@@ -34,6 +34,9 @@ DEFAULT_WIDTH = 8.43
 # Alleen gebruikt voor bestanden zonder metadata. / Only used for files without metadata.
 SKIPPED_SHEETS = {norm(name) for name in (METADATA_SHEET, *REFERENCE_SHEETS.values())}
 Position = tuple[int, int]
+PLACEHOLDER = re.compile(r"^(.*,\s*etc\.?|\.{4,})$", re.IGNORECASE)  # "…, etc." en "....." / "…, etc." and "....."
+DOUBLE_STAR = re.compile(r"(?<!\*)\*\*$")  # precies twee sterretjes / exactly two asterisks
+DOUBLE_STAR_REMARK = re.compile(r"^\*\*(?!\*)")
 VERIFY_FILL = "92D050"  # groene vulling = controleren met klant / green fill = verify with customer
 
 
@@ -158,6 +161,37 @@ def _metadata(workbook: Any) -> dict[str, Any] | None:
 def _rgb(cell: Any) -> str:
     colour = cell.fill.fgColor.rgb if cell.fill is not None and cell.fill.fill_type == "solid" else ""
     return colour.upper() if isinstance(colour, str) else ""
+
+
+def _canonical_title(heading: str, profile: DesignProfile) -> str:
+    """Canonieke sectietitel van het profiel als ``heading`` er alleen in haakjes of suffix van afwijkt
+    (bijv. 'Inwinningsinformatie (Sem.Rel' of zonder '(Sem.Rel)'); anders ``heading``.
+    Canonical section title of the profile when ``heading`` only differs in brackets or suffix (e.g.
+    'Inwinningsinformatie (Sem.Rel' or without '(Sem.Rel)'); otherwise ``heading``."""
+
+    def base(title: str) -> str:
+        return norm(title.split("(", 1)[0])
+
+    titles = [s.title for s in profile.after_object] + [r.title for r in profile.relations]
+    if heading in titles:
+        return heading
+    found = {t for t in titles if base(t) == base(heading) and base(heading)}
+    return next(iter(found)) if len(found) == 1 else heading
+
+
+def _split_remark_cells(
+    cells: list[tuple[int, str]], grid_columns: int, remark: str,
+) -> tuple[list[tuple[int, str]], str]:
+    """Tekst rechts van het raster die niet aansluit op het veld ervoor is een opmerking, geen veld.
+    Text right of the grid that does not connect to the field before it is a remark, not a field."""
+    columns = {c for c, _ in cells}
+    fields: list[tuple[int, str]] = []
+    for column, text in cells:
+        if column > grid_columns and column - 1 not in columns:
+            remark = f"{remark}; {text}" if remark else text
+        else:
+            fields.append((column, text))
+    return fields, remark
 
 
 def _is_red(rgb: object) -> bool:
@@ -328,6 +362,10 @@ def _read_sheet(
             if notes_mode:
                 section = None
                 continue
+            canonical = _canonical_title(heading, profile)
+            if canonical != heading:
+                warnings.append(f"Row {row}: section title '{heading}' normalised to '{canonical}'.")
+                heading = canonical
             style = _section_style(heading, _rgb(first), profile)
             section = Section(heading, style)
             tab.sections.append(section)
@@ -336,6 +374,12 @@ def _read_sheet(
         cells = [(c, _text(sheet.cell(row=row, column=c))) for c in range(1, grid_end + 1)]
         cells = [(c, t) for c, t in cells if t]
         remark = _text(sheet.cell(row=row, column=margin)) if margin else ""
+        placeholders = [t for _, t in cells if PLACEHOLDER.match(t)]
+        if placeholders and section is not None and not notes_mode:
+            warnings.append(f"Row {row}: placeholder '{placeholders[0]}' is not a field; skipped.")
+            cells = [(c, t) for c, t in cells if not PLACEHOLDER.match(t)]
+        if margin and not notes_mode and section is not None:
+            cells, remark = _split_remark_cells(cells, profile.grid_columns, remark)
         if remark:
             _add_footnotes(remark, tab.footnotes)
         if notes_mode or section is None:
@@ -363,17 +407,22 @@ def _read_sheet(
             label, annotation, footnote = split_cell(text, profile, section.title)
             if not label.strip("*"):
                 continue
+            if DOUBLE_STAR.search(label) and DOUBLE_STAR_REMARK.match(remark.lstrip()):
+                label = label.rstrip("*")  # uitgelegd door de opmerking, geen open vraag / explained by the remark
             row_cells.append(Cell(label, footnote, annotation=annotation))
             if _is_verify_cell(sheet.cell(row=row, column=column)):
                 result.verify.add(norm(label))
             result.positions[(section_index, row_index, len(row_cells) - 1)] = (row, column)
             result.label_positions.setdefault(norm(label.rstrip("*").strip()), (row, column))
             used_columns = max(used_columns, column)
+        if len(row_cells) > profile.grid_columns:
+            warnings.append(f"Row {row} has {len(row_cells)} fields; the profile allows {profile.grid_columns}.")
         section.rows.append(row_cells)
         if remark:
             section.margin[row_index] = remark
             assert margin is not None
-            result.margin_positions[(section_index, row_index)] = (row, margin)
+            if _text(sheet.cell(row=row, column=margin)):
+                result.margin_positions[(section_index, row_index)] = (row, margin)
     for section in tab.sections:
         section.repeater = _is_repeater(section)
     _finish(result, sheet, used_columns, margin, grid_end)

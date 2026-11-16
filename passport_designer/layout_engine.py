@@ -161,6 +161,10 @@ class LayoutEngine:
             section.rows = [rows[0] for _ in range(fixed.repeat)] + [[Cell(ELLIPSIS) for _ in rows[0]]]
         else:
             self._spread(rows, section)
+        for first, text in fixed.remarks:
+            index = next((i for i, row in enumerate(section.rows) if row and norm(row[0].label) == norm(first)), None)
+            if index is not None:
+                section.margin[index] = text
         return section
 
     def _relation(self, relation: RelationSection) -> Section:

@@ -269,6 +269,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "nl": 'De geladen specificatie heeft geen kolom "MinimaleDataset".',
     },
     "verify.tooltip": {"en": "Verify with customer", "nl": "Controleren met klant"},
+    "spec.orphan": {
+        "en": 'Object type "{name}" has attributes but no row in Objecttypen',
+        "nl": 'Objecttype "{name}" heeft attributen maar geen regel in Objecttypen',
+    },
     "menu.edit": {"en": "&Edit", "nl": "B&ewerken"},
     "verify.mark": {"en": "Mark: verify with customer", "nl": "Markeren: controleren met klant"},
     "verify.delete": {"en": "Delete field", "nl": "Veld verwijderen"},
