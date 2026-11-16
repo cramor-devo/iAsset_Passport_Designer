@@ -156,6 +156,22 @@ def test_memo_is_a_table_with_search_boxes_and_pager(tab):
     assert not table.findChildren(QLabel, "mockHead")  # geen donkere band / no dark band
 
 
+def test_verify_mark_applies_to_table_header_and_search_box(tab):
+    from passport_designer.ui.theme import VERIFY_TEXT
+
+    mockup = PassportMockup()
+    mockup.show_tab(tab, "", DARK, verify={"memo veld"})
+    table = next(t for t in mockup.findChildren(QWidget, "mockTable") if t.findChildren(QLabel, "mockNoData"))
+    heads = {h.text(): h.styleSheet() for h in table.findChildren(QLabel, "mockTableHead")}
+    boxes = {b.text(): b.styleSheet() for b in table.findChildren(QLabel, "mockSearch")}
+    assert VERIFY_TEXT in heads["Memo veld"] and VERIFY_TEXT in boxes["Zoeken op memo veld"]
+    assert VERIFY_TEXT not in heads["Nummer"] and VERIFY_TEXT not in boxes["Zoeken op nummer"]
+    mockup.show_tab(tab, "", DARK)
+    plain = next(t for t in mockup.findChildren(QWidget, "mockTable") if t.findChildren(QLabel, "mockNoData"))
+    assert all(VERIFY_TEXT not in h.styleSheet() for h in plain.findChildren(QLabel, "mockTableHead"))
+    assert any(f"color: {DARK.text};" in h.styleSheet() for h in plain.findChildren(QLabel, "mockTableHead"))
+
+
 def test_table_sections_are_configurable_per_profile(tab):
     assert tab.profile.is_table_section("Memo (Sem.Rel)") and not tab.profile.is_table_section("Actoren (Sem.Rel)")
 

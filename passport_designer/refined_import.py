@@ -261,9 +261,13 @@ def _section_style(title: str, colour: str, profile: DesignProfile) -> SectionSt
     return semantic_style(title)
 
 
-def _is_heading(sheet: Worksheet, row: int, grid_end: int) -> bool:
+def _is_heading(sheet: Worksheet, row: int, grid_end: int, colours: tuple[str, ...] = ()) -> bool:
+    """``colours``: als gevuld, telt alleen een sectiekleur als kop (veldarcering van de minimale dataset niet).
+    If given, only a section-band colour counts as heading (not minimal dataset field shading)."""
     first = sheet.cell(row=row, column=1)
     if not _text(first) or not _is_filled(first):
+        return False
+    if colours and not _rgb(first).endswith(colours):
         return False
     return not any(_text(sheet.cell(row=row, column=c)) for c in range(2, grid_end + 1))
 
@@ -354,8 +358,16 @@ def _read_sheet(
     pending_blank = False
     used_columns = 1
     first_row = 3 if has_header else 1
+    # Legenda van de minimale dataset (bereik uit '_designer') overslaan; kopkleuren dan strikt.
+    # Skip the minimal dataset legend (range from '_designer'); section-band colours are then strict.
+    legend = (sheet_meta or {}).get("legend_rows") or []
+    legend_rows = range(int(legend[0]), int(legend[1]) + 1) if len(legend) == 2 else range(0)
+    minimal_on = (workbook_meta or {}).get("minimal_dataset_shown") == "true"
+    strict = (GREY, profile.semantic_fill, PURPLE) if minimal_on else ()
     for row in range(first_row, sheet.max_row + 1):
-        if _is_heading(sheet, row, grid_end):
+        if row in legend_rows:
+            continue
+        if _is_heading(sheet, row, grid_end, strict):
             first = sheet.cell(row=row, column=1)
             heading = _text(first)
             notes_mode = norm(heading) == norm(SECTION_NOTES)

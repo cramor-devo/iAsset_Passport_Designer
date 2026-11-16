@@ -455,11 +455,14 @@ class PassportMockup(QFrame):
             title = QLabel(self._caption(cell))
             title.setObjectName("mockTableHead")
             title.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-            title.setStyleSheet(f"color: {p.text}; font-weight: 700; font-size: 8pt; background: transparent;")
+            marked = norm(cell.label) in self._verify
+            head_text = VERIFY_TEXT if marked else p.text
+            field_text = VERIFY_TEXT if marked else p.muted
+            title.setStyleSheet(f"color: {head_text}; font-weight: 700; font-size: 8pt; background: transparent;")
             title.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
             border = KIND_COLOURS.get(colour, p.separator) if colour else p.separator
             style = (
-                f"background: {self._fill(cell, 'transparent')}; color: {p.muted}; "
+                f"background: {self._fill(cell, 'transparent')}; color: {field_text}; "
                 f"border: {2 if colour else 1}px solid {border}; "
                 f"border-radius: 3px; padding: 2px 8px; font-size: 9pt;"
             )
@@ -470,7 +473,7 @@ class PassportMockup(QFrame):
                 inner.setContentsMargins(0, 0, 6, 0)
                 for text in (ALL_TEXT, CHEVRON):
                     part = QLabel(text)
-                    part.setStyleSheet(f"color: {p.muted}; font-size: 9pt; border: none; background: transparent;")
+                    part.setStyleSheet(f"color: {field_text}; font-size: 9pt; border: none; background: transparent;")
                     inner.addWidget(part, 1 if text == ALL_TEXT else 0)
                 box.setStyleSheet(f"QFrame#mockDropdown {{ {style} padding: 0 0 0 8px; }}")
             else:

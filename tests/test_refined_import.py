@@ -431,3 +431,26 @@ def test_wide_row_warns(tmp_path, wave1_spec):
 
     bord = _v3_sheet(tmp_path, wave1_spec, edit)
     assert any("has 6 fields; the profile allows 5." in w for w in bord.warnings)
+
+
+def _labels(sheet) -> list[list[str]]:
+    return [[label_key(c.display) for c in r] for s in sheet.tab.sections for r in s.rows]
+
+
+def test_minimal_dataset_shading_and_legend_do_not_change_import(tmp_path, wave1_spec):
+    from passport_designer.dataset_flags import MDS_COMMON, MinimalMark
+    from passport_designer.profiles import ROTTERDAM_V3
+
+    tab = LayoutEngine(wave1_spec, LayoutOptions(profile=ROTTERDAM_V3)).build_all()[0]
+    single = next(r for s in tab.sections for r in s.rows if len(r) == 1)
+    marks = {norm(single[0].label): MinimalMark((MDS_COMMON,), ("A",))}
+    legend = {f"Type {i}": "FFC000" for i in range(5)}  # 5 + 'All types' = chip alone on the final row
+    plain = export_workbook([tab], tmp_path / "plain.xlsx", spec=wave1_spec)
+    shaded = export_workbook(
+        [tab], tmp_path / "shaded.xlsx", spec=wave1_spec, minimal_by_tab={tab.name: (marks, legend)},
+    )
+    base = read_refined(plain, wave1_spec).sheets[0]
+    sheet = read_refined(shaded, wave1_spec).sheets[0]
+    assert [s.title for s in sheet.tab.sections] == [s.title for s in base.tab.sections]
+    assert _labels(sheet) == _labels(base)
+    assert sheet.tab.notes == base.tab.notes

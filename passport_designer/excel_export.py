@@ -325,7 +325,7 @@ def write_metadata(
     workbook: Workbook, tabs: list[PassportTab], titles: list[str], spec: SpecModel | None, used: set[str],
     reference_sheets: list[str] | None = None, *, only_included: bool = True, minimal_shown: bool = False,
     verify: dict[str, set[str]] | None = None, deleted: dict[str, set[str]] | None = None,
-    layouts: dict[str, dict[str, object]] | None = None,
+    layouts: dict[str, dict[str, object]] | None = None, legend_rows: dict[str, tuple[int, int]] | None = None,
 ) -> None:
     """Verborgen blad '_designer' met sleutel/waarde-regels (versie, profiel, bronnen, filterkolom en per ontwerpblad
     de objecttypen, samenvoeging en voetnoten als JSON). Hidden '_designer' sheet with key/value rows (version,
@@ -357,6 +357,8 @@ def write_metadata(
             info["deleted"] = sorted(deleted[title])
         if layouts and layouts.get(title):
             info["layout"] = layouts[title]
+        if legend_rows and title in legend_rows:
+            info["legend_rows"] = list(legend_rows[title])
         sheet.append([f"sheet:{title}", json.dumps(info, ensure_ascii=False)])
     sheet.column_dimensions["A"].width = 28
     sheet.column_dimensions["B"].width = 100
@@ -394,6 +396,7 @@ def export_workbook(
     by_title_verify: dict[str, set[str]] = {}
     by_title_deleted: dict[str, set[str]] = {}
     by_title_layout: dict[str, dict[str, object]] = {}
+    by_title_legend: dict[str, tuple[int, int]] = {}
     for tab, name in zip(tabs, names, strict=True):
         sheet = workbook.create_sheet(sheet_title(name, used))
         titles.append(sheet.title)
@@ -401,6 +404,9 @@ def export_workbook(
         marks, legend = (minimal_by_tab or {}).get(name, ({}, {}))
         verify = (verify_by_tab or {}).get(name, set())
         write_tab(sheet, tab, muted=muted, minimal=marks, legend=legend, verify=verify)
+        if legend and tab.profile.header_lines:
+            last = 3 + len(legend) // tab.profile.grid_columns  # chips = len(legend) + 1 ('All types')
+            by_title_legend[sheet.title] = (3, last)
         by_title_verify[sheet.title] = verify
         by_title_deleted[sheet.title] = (deleted_by_tab or {}).get(name, set())
         if layout_by_tab and layout_by_tab.get(name):
@@ -410,6 +416,7 @@ def export_workbook(
     write_metadata(
         workbook, tabs, titles, spec, used, references, only_included=only_included,
         minimal_shown=bool(minimal_by_tab), verify=by_title_verify, deleted=by_title_deleted, layouts=by_title_layout,
+        legend_rows=by_title_legend,
     )
     target = Path(path)
     workbook.save(target)
