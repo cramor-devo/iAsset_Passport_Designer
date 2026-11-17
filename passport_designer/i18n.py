@@ -519,6 +519,46 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "nl": "Na de reparatie: nog {issues} probleem/problemen.",
     },
     "annot.fix_failed": {"en": "The fix failed:\n{detail}", "nl": "De reparatie is mislukt:\n{detail}"},
+    # --- 0.5.1: paspoorten hernoemen, menu-indeling, lijst / rename passports, menu layout, list ---
+    "menu.tools": {"en": "&Tools", "nl": "&Controle"},
+    "action.rename_tab": {"en": "&Rename passport…", "nl": "Paspoort &hernoemen…"},
+    "action.reset_tab_name": {"en": "Reset passport name", "nl": "Paspoortnaam herstellen"},
+    "rename.title": {"en": "Rename passport", "nl": "Paspoort hernoemen"},
+    "rename.title_suggestion": {"en": "Rename merge suggestion", "nl": "Samenvoegsuggestie hernoemen"},
+    "rename.prompt": {"en": "New name:", "nl": "Nieuwe naam:"},
+    "rename.reset": {"en": "Reset to \"{name}\"", "nl": "Herstellen naar \"{name}\""},
+    "rename.sheet_note": {
+        "en": "Note: as an Excel sheet name this will be shortened or adjusted (max 31 characters, no []:*?/\\).",
+        "nl": "Let op: als Excel-tabbladnaam wordt dit ingekort of aangepast (max. 31 tekens, geen []:*?/\\).",
+    },
+    "rename.done": {"en": "Renamed \"{old}\" to \"{new}\".", "nl": "\"{old}\" hernoemd naar \"{new}\"."},
+    "rename.reset_done": {
+        "en": "Name of \"{old}\" reset to \"{new}\".", "nl": "Naam van \"{old}\" hersteld naar \"{new}\".",
+    },
+    "rename.pick_one": {
+        "en": "Select exactly one passport to rename.", "nl": "Kies precies één paspoort om te hernoemen.",
+    },
+    "rename.imported_disabled": {
+        "en": "Renaming is only available for the generated design (not for an imported Excel file).",
+        "nl": "Hernoemen kan alleen bij het gegenereerde ontwerp (niet bij een geïmporteerd Excel-bestand).",
+    },
+    "rename.suggestion_done": {
+        "en": "Suggestion renamed to \"{name}\". Press Apply to merge.",
+        "nl": "Suggestie hernoemd naar \"{name}\". Kies Toepassen om samen te voegen.",
+    },
+    "rename.suggestion_button": {"en": "Rename suggestion…", "nl": "Suggestie hernoemen…"},
+    "rename.renamed_tip": {"en": "Renamed (original: {name})", "nl": "Hernoemd (origineel: {name})"},
+    "list.filter_placeholder": {"en": "Search passports…", "nl": "Paspoorten zoeken…"},
+    "list.tip": {"en": "{name}\n{count} object type(s)", "nl": "{name}\n{count} objecttype(n)"},
+    "merge.menu_preview": {"en": "Preview", "nl": "Voorbeeld"},
+    "merge.menu_apply": {"en": "Apply", "nl": "Toepassen"},
+    "undo.rename": {"en": "rename", "nl": "hernoemen"},
+    "undo.field": {"en": "field change", "nl": "veldwijziging"},
+    "undo.layout": {"en": "layout load", "nl": "indeling laden"},
+    "undo.named": {"en": "&Undo {what}", "nl": "{what} &ongedaan maken"},
+    "redo.named": {"en": "&Redo {what}", "nl": "{what} &opnieuw uitvoeren"},
+    "status.undone": {"en": "Undone: {what}.", "nl": "Ongedaan gemaakt: {what}."},
+    "status.redone": {"en": "Redone: {what}.", "nl": "Opnieuw uitgevoerd: {what}."},
 }
 
 LANGUAGES: dict[str, str] = {"en": "English", "nl": "Nederlands"}

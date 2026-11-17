@@ -115,8 +115,9 @@ class LayoutEngine:
         types = [o for o in tab.object_types if o.name == object_type]
         if not types:
             return tab
-        single = self.build(tab.name, types[:1], source_filters=tab.merged_from or [tab.name])
+        single = self.build(tab.name, types[:1], source_filters=tab.merged_from or [tab.original_name or tab.name])
         single.merged_from = list(tab.merged_from)
+        single.original_name = tab.original_name
         return single
 
     # --- secties / sections ----------------------------------------------------------------------------------
