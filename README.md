@@ -96,12 +96,20 @@ The log file is stored at `%LOCALAPPDATA%\iAssetPassportDesigner\passport_design
    group and similar attributes (Jaccard similarity). Fields that do not apply to every object type get a footnote:
    these are the fields you switch on or off per sub-theme in iAsset. Use **Preview merged passport** to inspect a
    suggestion, **Apply merge** to merge the filters, and **Export merge matrix…** to save a field × object type matrix.
-   You can also merge by hand: select two or more passports in the list (Ctrl/Shift+click) and choose **File → Merge
+   You can also merge by hand: select two or more passports in the list (Ctrl/Shift+click) and choose **Edit → Merge
    selected passports…** (**Ctrl+M**, also in the context menu and as **Merge selected…** on the Merge tab). This works
    whatever the filter, group or advisor threshold. Enter a name for the new passport (required, at most 50
    characters, unique). If the passports differ in management group or filter, the dialog lists the differences and you
    must confirm explicitly (Cancel is the default). A manual merge can be undone like any other merge and is not
    available while an imported design is shown.
+   **Rename a passport:** select it and press **F2** (or double-click it, right-click → **Rename passport…**, or
+   **Edit → Rename passport…**). The name must be unique (case-insensitive) and at most 50 characters; an Excel sheet name is
+   shortened to 31 characters in the export, with a note in the dialog. Marks, deletions and layout move with the
+   passport, a renamed passport shows ✎ and its original name in the tooltip, and **Reset passport name** (context menu)
+   restores it. On the Merge suggestions tab, **Rename suggestion…** (button or right-click, next to Preview and Apply) renames
+   a suggestion before you apply it. Renames are kept for the session only (like merges) and are cleared when you open
+   new specifications; **Edit → Undo rename** steps back. Use the search box above the passport list to filter long
+   lists.
 5. Choose **File → Load passport field ID file…** to load the V2 passport diverse-fields list (e.g. `passport field list.csv`, semicolon CSV with
    `id;label;name;type;values;…`; JSON and xlsx with label/name and id also work). Each passport field gets the `id`
    of the diverse field with the same label. The iAsset GUI field catalog (xlsx with the sheets `Paspoort velden` and
@@ -115,7 +123,7 @@ The log file is stored at `%LOCALAPPDATA%\iAssetPassportDesigner\passport_design
    saves the mockup (as shown in the preview) as an image. Every Excel export also contains the reference sheets
    `Bron Objecttypen` and `Bron Attributen` (the spec rows of the exported object types, with source file and date) and
    a hidden `_designer` sheet with metadata (version, profile, spec files, filter column, tab → object types).
-8. **File → Check field IDs…** checks the passport fields against the field IDs you loaded, **offline**: the app
+8. **Tools → Check field IDs…** checks the passport fields against the field IDs you loaded, **offline**: the app
    never calls iAsset. Load a saved V2 `GET /diverse-fields` JSON or the iAsset GUI field catalog xlsx first. The
    dialog shows per field whether the ID is found or missing, whether label or field type differ, and whether the
    field is enabled for the sub-theme of each object type (matched by name; this needs the catalog xlsx, a JSON only
@@ -129,7 +137,7 @@ The log file is stored at `%LOCALAPPDATA%\iAssetPassportDesigner\passport_design
    changes** outlines these fields in the mockup; it is off by default, so screenshots stay clean. **File → Back to
    generated design** returns to the generated design. While an imported design is shown, merging selected passports
    and exporting per object type are unavailable.
-10. **File → Check/fix annotations…** checks a refined Excel file against the specification: `(n)` markers that do not
+10. **Tools → Check/fix annotations…** checks a refined Excel file against the specification: `(n)` markers that do not
     match, duplicates, gaps and `Opmerkingen` rows that do not match. Only the Object informatie markers are checked.
     **Fix → _fixed.xlsx** writes `<name>_fixed.xlsx` with its own number for each field in reading order and the
     `Opmerkingen` text beside the right rows. Layout and styling stay untouched and the original file is not changed.
@@ -160,7 +168,7 @@ in the report, with **Open folder**.
 ### Recommended workflow
 
 1. Export the Excel design (**File → Export Excel design…**) and refine it in Excel.
-2. Run **File → Check/fix annotations…** and use the `_fixed.xlsx` copy.
+2. Run **Tools → Check/fix annotations…** and use the `_fixed.xlsx` copy.
 3. Import it with **File → Import refined Excel…** and review the **Cross-reference** tab.
 4. Take a screenshot with **File → Export mockup as PNG…** (highlighting off for a clean result).
 
@@ -169,10 +177,11 @@ in the report, with **Open folder**.
 | Action | Shortcut |
 |---|---|
 | Load passport field ID file… | Ctrl+I |
-| Check field IDs… | Ctrl+Shift+D |
+| Check field IDs… (Tools menu) | Ctrl+Shift+D |
 | Import refined Excel… | Ctrl+Shift+I |
-| Check/fix annotations… | Ctrl+Shift+A |
-| Merge selected passports… | Ctrl+M |
+| Check/fix annotations… (Tools menu) | Ctrl+Shift+A |
+| Merge selected passports… (Edit menu) | Ctrl+M |
+| Rename passport… (Edit menu) | F2 |
 | Export Excel design… | Ctrl+E |
 | Export Excel design per object type… | Ctrl+Shift+E |
 | Export mockup as PNG… | Ctrl+P |

@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QInputDialog,
     QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMainWindow,
@@ -74,7 +75,14 @@ from ..layout_overrides import (
     with_capture,
 )
 from ..layout_overrides import to_json as layouts_to_json
-from ..merge_advisor import DEFAULT_THRESHOLD, MergeSuggestion, apply_merges, manual_merge_info, suggest_merges
+from ..merge_advisor import (
+    DEFAULT_THRESHOLD,
+    MergeSuggestion,
+    apply_merges,
+    manual_merge_info,
+    merged_tab,
+    suggest_merges,
+)
 from ..models import PassportTab, SectionStyle, Severity, SpecModel, norm
 from ..payload import (
     ENDPOINT,
@@ -87,6 +95,7 @@ from ..payload import (
 )
 from ..profiles import DEFAULT_PROFILE, PROFILES, DesignProfile
 from ..refined_import import RefinedSheet, RefinedWorkbook, read_refined
+from ..renaming import apply_renames, original_name, validate_rename
 from ..settings import AppSettings, data_dir
 from ..spec_reader import SpecError, read_spec
 from .annotation_dialog import AnnotationDialog
@@ -96,6 +105,7 @@ from .crossref_panel import CrossRefPanel
 from .id_check_dialog import IdCheckDialog
 from .merge_dialog import MergeDialog
 from .mockup import PassportMockup, render_tab_pixmap
+from .rename_dialog import RenameDialog
 from .restore_dialog import RestoreDialog
 from .settings_dialog import PayloadSettingsDialog
 from .sheet_preview import SheetPreview
@@ -125,6 +135,18 @@ class ImportResult:
     diffs: list[tuple[str, TabDiff]] | None
 
 
+@dataclass
+class _State:
+    """Momentopname voor ongedaan maken: markeringen, hernoemingen, samenvoegingen en het getoonde paspoort.
+    Snapshot for undo: marks, renames, merges and the passport shown."""
+
+    overrides: dict[str, TabOverride]
+    renames: dict[str, str]
+    merges: list[tuple[str, list[str]]]
+    selected: str
+    label: str  # i18n-sleutel van de handeling / i18n key of the action
+
+
 class MainWindow(QMainWindow):
     def __init__(self, settings: AppSettings | None = None) -> None:
         super().__init__()
@@ -142,13 +164,19 @@ class MainWindow(QMainWindow):
         self.engine: LayoutEngine | None = None
         self.suggestions: list[MergeSuggestion] = []
         self.applied_merges: list[tuple[str, list[str]]] = []
+        # Eigen paspoortnamen: gegenereerde naam -> eigen naam; alleen in de sessie, zoals samenvoegingen.
+        # Custom passport names: generated name -> custom name; session-only, like merges.
+        self.renames: dict[str, str] = {}
+        # Door de gebruiker gekozen suggestienamen, per ledenset (vervallen bij andere drempel).
+        # Suggestion names chosen by the user, per member set (dropped when the threshold changes).
+        self._suggestion_names: dict[frozenset[str], str] = {}
         self._preview: PassportTab | None = None
         self.imported: RefinedWorkbook | None = None
         # Handmatige markeringen en verwijderingen per paspoortnaam, plus een stapel om ongedaan te maken.
         # Manual marks and deletions per passport name, plus a stack for undo.
         self.overrides: dict[str, TabOverride] = {}
-        self._undo_stack: list[dict[str, TabOverride]] = []
-        self._redo_stack: list[dict[str, TabOverride]] = []
+        self._undo_stack: list[_State] = []
+        self._redo_stack: list[_State] = []
         # Alle bewaarde indelingen (ook van andere profielen), sleutel 'profiel|paspoortnaam'; automatisch bewaard
         # na 500 ms rust. / All stored layouts (other profiles too), key 'profile|passport name'; autosaved after
         # 500 ms of rest.
@@ -185,10 +213,15 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(self.column_label)
         left_layout.addWidget(self.column_combo)
         self.filter_label = QLabel()
+        self.filter_search = QLineEdit()
+        self.filter_search.setClearButtonEnabled(True)
+        self.filter_search.textChanged.connect(self._apply_list_search)
         self.filter_list = QListWidget()
         self.filter_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.filter_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.filter_list.customContextMenuRequested.connect(self._show_filter_menu)
+        self.filter_list.itemDoubleClicked.connect(lambda item: self._rename_row(self.filter_list.row(item)))
+        self.filter_list.itemSelectionChanged.connect(self._update_rename_state)
         self.filter_label.setBuddy(self.filter_list)
         self.filter_list.currentRowChanged.connect(self._on_filter_changed)
         self.type_label = QLabel()
@@ -196,6 +229,7 @@ class MainWindow(QMainWindow):
         self.type_label.setBuddy(self.type_combo)
         self.type_combo.currentIndexChanged.connect(self._refresh_views)
         left_layout.addWidget(self.filter_label)
+        left_layout.addWidget(self.filter_search)
         left_layout.addWidget(self.filter_list, 1)
         for widget in (self.type_label, self.type_combo):
             left_layout.addWidget(widget)
@@ -280,19 +314,26 @@ class MainWindow(QMainWindow):
         self.merge_tree.setColumnCount(5)
         self.merge_tree.setRootIsDecorated(True)
         self.merge_tree.itemDoubleClicked.connect(lambda *_: self.preview_merge())
+        self.merge_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.merge_tree.customContextMenuRequested.connect(self._show_merge_menu)
         layout.addWidget(self.merge_tree, 1)
         buttons = QHBoxLayout()
         self.preview_button = QPushButton()
         self.preview_button.clicked.connect(self.preview_merge)
         self.apply_button = QPushButton()
         self.apply_button.clicked.connect(self.apply_selected_merge)
+        self.rename_suggestion_button = QPushButton()
+        self.rename_suggestion_button.clicked.connect(self.rename_suggestion)
         self.reset_button = QPushButton()
         self.reset_button.clicked.connect(self.reset_merges)
         self.merge_selected_button = QPushButton()
         self.merge_selected_button.clicked.connect(self.merge_selected)
         self.merge_export_button = QPushButton()
         self.merge_export_button.clicked.connect(self.export_merge_matrix)
-        for button in (self.preview_button, self.apply_button, self.merge_selected_button, self.reset_button):
+        for button in (
+            self.preview_button, self.rename_suggestion_button, self.apply_button, self.merge_selected_button,
+            self.reset_button,
+        ):
             buttons.addWidget(button)
         buttons.addStretch(1)
         buttons.addWidget(self.merge_export_button)
@@ -348,6 +389,7 @@ class MainWindow(QMainWindow):
         self.file_menu = bar.addMenu("") or QMenu()
         self.view_menu = bar.addMenu("") or QMenu()
         self.edit_menu = bar.addMenu("") or QMenu()
+        self.tools_menu = bar.addMenu("") or QMenu()
         self.settings_menu = bar.addMenu("") or QMenu()
         self.help_menu = bar.addMenu("") or QMenu()
         self.open_action = self._action("action.open", self.open_specs, QKeySequence.StandardKey.Open)
@@ -363,12 +405,13 @@ class MainWindow(QMainWindow):
         self.png_action = self._action("action.export_png", self.export_png, "Ctrl+P")
         self.payload_action = self._action("action.save_payload", self.save_payload, QKeySequence.StandardKey.Save)
         self.all_payload_action = self._action("action.save_all_payloads", self.save_all_payloads, "Ctrl+Shift+S")
-        self.merge_selected_action = self._action("action.merge_selected", self.merge_selected, "Ctrl+M")
         self.quit_action = self._action("action.quit", self.close, QKeySequence.StandardKey.Quit)
-        for action in (self.open_action, self.add_action, self.ids_action, self.check_ids_action):
+        self.save_layout_action = self._action("layout.save", self.save_layout)
+        self.load_layout_action = self._action("layout.load", self.load_layout_dialog)
+        for action in (self.open_action, self.add_action, self.ids_action):
             self.file_menu.addAction(action)
         self.file_menu.addSeparator()
-        for action in (self.import_action, self.back_action, self.annotations_action):
+        for action in (self.import_action, self.back_action):
             self.file_menu.addAction(action)
         self.file_menu.addSeparator()
         for action in (
@@ -376,9 +419,13 @@ class MainWindow(QMainWindow):
         ):
             self.file_menu.addAction(action)
         self.file_menu.addSeparator()
-        self.file_menu.addAction(self.merge_selected_action)
+        self.file_menu.addAction(self.save_layout_action)
+        self.file_menu.addAction(self.load_layout_action)
         self.file_menu.addSeparator()
         self.file_menu.addAction(self.quit_action)
+        # Controle-menu: de controles die eerder in Bestand stonden / Tools menu: the checks that were in File
+        self.tools_menu.addAction(self.check_ids_action)
+        self.tools_menu.addAction(self.annotations_action)
 
         self.highlight_action = self._action("action.highlight", self._on_highlight_toggled)
         self.highlight_action.setCheckable(True)
@@ -432,16 +479,19 @@ class MainWindow(QMainWindow):
         self.undo_action.setEnabled(False)
         self.redo_action = self._action("layout.redo", self.redo_override, QKeySequence.StandardKey.Redo)
         self.redo_action.setEnabled(False)
-        self.save_layout_action = self._action("layout.save", self.save_layout)
-        self.load_layout_action = self._action("layout.load", self.load_layout_dialog)
-        self.file_menu.insertAction(self.merge_selected_action, self.save_layout_action)
-        self.file_menu.insertAction(self.merge_selected_action, self.load_layout_action)
-        self.file_menu.insertSeparator(self.merge_selected_action)
+        self.merge_selected_action = self._action("action.merge_selected", self.merge_selected, "Ctrl+M")
+        self.rename_action = self._action("action.rename_tab", self.rename_current_tab, "F2")
+        self.rename_action.setEnabled(False)
+        # Bewerken: eerst ongedaan maken, dan velden, dan de paspoortenset / Edit: undo first, then fields, then the
+        # set of passports
+        self.edit_menu.addAction(self.undo_action)
+        self.edit_menu.addAction(self.redo_action)
+        self.edit_menu.addSeparator()
         for action in (self.mark_action, self.delete_action, self.delete_marked_action, self.restore_action):
             self.edit_menu.addAction(action)
         self.edit_menu.addSeparator()
-        self.edit_menu.addAction(self.undo_action)
-        self.edit_menu.addAction(self.redo_action)
+        self.edit_menu.addAction(self.rename_action)
+        self.edit_menu.addAction(self.merge_selected_action)
 
         self.payload_settings_action = self._action("action.payload_settings", self.edit_payload_settings)
         self.settings_menu.addAction(self.payload_settings_action)
@@ -470,6 +520,7 @@ class MainWindow(QMainWindow):
         self.file_menu.setTitle(tr("menu.file"))
         self.view_menu.setTitle(tr("menu.view"))
         self.edit_menu.setTitle(tr("menu.edit"))
+        self.tools_menu.setTitle(tr("menu.tools"))
         self.settings_menu.setTitle(tr("menu.settings"))
         self.help_menu.setTitle(tr("menu.help"))
         self.theme_menu.setTitle(tr("menu.theme"))
@@ -480,6 +531,7 @@ class MainWindow(QMainWindow):
         self.column_label.setText(tr("panel.filter_column"))
         self.column_combo.setToolTip(tr("panel.filter_column_tip"))
         self.filter_label.setText(tr("panel.filters"))
+        self.filter_search.setPlaceholderText(tr("list.filter_placeholder"))
         self.type_label.setText(tr("panel.object_type"))
         if self.type_combo.count():
             self.type_combo.setItemText(0, tr("panel.all_types"))
@@ -497,6 +549,7 @@ class MainWindow(QMainWindow):
         self.merge_hint.setText(tr("merge.hint"))
         self.preview_button.setText(tr("merge.preview"))
         self.apply_button.setText(tr("merge.apply"))
+        self.rename_suggestion_button.setText(tr("rename.suggestion_button"))
         self.reset_button.setText(tr("merge.reset"))
         self.merge_selected_button.setText(tr("merge.selected"))
         self._update_merge_state()
@@ -595,6 +648,8 @@ class MainWindow(QMainWindow):
             self._flush_layouts()
             self.spec = loaded
             self.applied_merges.clear()
+            self.renames.clear()
+            self._suggestion_names.clear()
             self._reset_overrides()
         else:
             self.spec.merge(loaded)
@@ -890,8 +945,12 @@ class MainWindow(QMainWindow):
         Merging only for the generated design; it would discard an import."""
         blocked = self.imported is not None
         tip = tr("merge.imported_disabled")
-        for widget in (self.apply_button, self.merge_selected_button, self.reset_button, self.merge_selected_action):
+        for widget in (
+            self.apply_button, self.merge_selected_button, self.reset_button, self.merge_selected_action,
+            self.rename_suggestion_button,
+        ):
             widget.setEnabled(not blocked)
+        self._update_rename_state()
         self.apply_button.setToolTip(tip if blocked else "")
         self.reset_button.setToolTip(tip if blocked else "")
         self.merge_selected_button.setToolTip(tip if blocked else tr("merge.selected_tip"))
@@ -999,6 +1058,8 @@ class MainWindow(QMainWindow):
         self.spec.filter_column = column
         self.settings.set("design/filter_column", column)
         self.applied_merges.clear()
+        self._reset_renames()
+        self._suggestion_names.clear()
         self._populate_columns()
         self._rebuild_designs()
         files, types = len(self.spec.sources), len(self.spec.object_types)
@@ -1089,6 +1150,19 @@ class MainWindow(QMainWindow):
         self._undo_stack.clear()
         self._redo_stack.clear()
 
+    def _snapshot(self, label: str) -> _State:
+        tab = self.current_tab()
+        return _State(
+            dict(self.overrides), dict(self.renames), [(n, list(m)) for n, m in self.applied_merges],
+            tab.name if tab else "", label,
+        )
+
+    def _push_undo(self, label: str) -> None:
+        """Bewaar de toestand voor ongedaan maken (max. 50). / Keep the state for undo (max 50)."""
+        self._undo_stack.append(self._snapshot(label))
+        del self._undo_stack[:-50]
+        self._redo_stack.clear()
+
     def _change_override(self, change: Callable[[TabOverride], TabOverride]) -> None:
         """Pas het huidige paspoort aan, met een momentopname voor ongedaan maken. / Change the current passport, with
         a snapshot for undo."""
@@ -1099,9 +1173,7 @@ class MainWindow(QMainWindow):
         updated = change(current)
         if updated == current:
             return
-        self._undo_stack.append(dict(self.overrides))
-        del self._undo_stack[:-50]
-        self._redo_stack.clear()
+        self._push_undo("undo.field")
         if updated.is_empty:
             self.overrides.pop(tab.name, None)
         else:
@@ -1109,21 +1181,34 @@ class MainWindow(QMainWindow):
         self._schedule_save()
         self._refresh_views()
 
+    def _restore(self, state: _State) -> None:
+        """Zet een momentopname terug; bij andere namen worden de ontwerpen opnieuw opgebouwd. / Restore a snapshot;
+        when names differ the designs are rebuilt."""
+        rebuild = state.renames != self.renames or state.merges != self.applied_merges
+        self.overrides = dict(state.overrides)
+        self.renames = dict(state.renames)
+        self.applied_merges = [(n, list(m)) for n, m in state.merges]
+        self._schedule_save()
+        if rebuild and self.spec is not None and self.imported is None:
+            self._rebuild_designs(select=state.selected)
+        else:
+            self._refresh_views()
+
     def undo_override(self) -> None:
         if not self._undo_stack:
             return
-        self._redo_stack.append(dict(self.overrides))
-        self.overrides = self._undo_stack.pop()
-        self._schedule_save()
-        self._refresh_views()
+        state = self._undo_stack.pop()
+        self._redo_stack.append(self._snapshot(state.label))
+        self._restore(state)
+        self.statusBar().showMessage(tr("status.undone", what=tr(state.label)))
 
     def redo_override(self) -> None:
         if not self._redo_stack:
             return
-        self._undo_stack.append(dict(self.overrides))
-        self.overrides = self._redo_stack.pop()
-        self._schedule_save()
-        self._refresh_views()
+        state = self._redo_stack.pop()
+        self._undo_stack.append(self._snapshot(state.label))
+        self._restore(state)
+        self.statusBar().showMessage(tr("status.redone", what=tr(state.label)))
 
     # --- indeling: slepen en neerzetten / layout: drag and drop ----------------------------------------------
 
@@ -1237,10 +1322,23 @@ class MainWindow(QMainWindow):
         self._apply_store()
 
     def _apply_store(self) -> None:
-        prefix = self._layout_key("")
-        self.overrides = {k[len(prefix):]: o for k, o in self._layout_store.items() if k.startswith(prefix)}
+        self.overrides = self._overrides_from_store()
         self._undo_stack.clear()
         self._redo_stack.clear()
+
+    def _overrides_from_store(self) -> dict[str, TabOverride]:
+        """Indelingen van het huidige profiel onder de getoonde namen (de opslag gebruikt de gegenereerde namen).
+        Layouts of the current profile under the displayed names (the store uses the generated names)."""
+        prefix = self._layout_key("")
+        return {
+            self.renames.get(k[len(prefix):], k[len(prefix):]): o
+            for k, o in self._layout_store.items() if k.startswith(prefix)
+        }
+
+    def _stored_name(self, shown: str) -> str:
+        """Naam waaronder de indeling bewaard wordt: de gegenereerde naam van een hernoemd paspoort.
+        Name under which the layout is stored: the generated name of a renamed passport."""
+        return next((generated for generated, custom in self.renames.items() if custom == shown), shown)
 
     def _schedule_save(self) -> None:
         if self.imported is None and self.spec is not None:
@@ -1254,7 +1352,9 @@ class MainWindow(QMainWindow):
     def _collect_store(self) -> dict[str, TabOverride]:
         prefix = self._layout_key("")
         store = {k: o for k, o in self._layout_store.items() if not k.startswith(prefix)}
-        store.update({self._layout_key(name): o for name, o in self.overrides.items() if not o.is_empty})
+        store.update({
+            self._layout_key(self._stored_name(name)): o for name, o in self.overrides.items() if not o.is_empty
+        })
         return store
 
     def _save_layouts(self) -> None:
@@ -1299,11 +1399,9 @@ class MainWindow(QMainWindow):
         except LayoutFileError as exc:
             self._warn(tr("layout.file_error", detail=str(exc)))
             return
-        self._undo_stack.append(dict(self.overrides))
-        self._redo_stack.clear()
+        self._push_undo("undo.layout")
         self._layout_store = {**self._collect_store(), **loaded}
-        prefix = self._layout_key("")
-        self.overrides = {k[len(prefix):]: o for k, o in self._layout_store.items() if k.startswith(prefix)}
+        self.overrides = self._overrides_from_store()
         self._schedule_save()
         self._refresh_views()
         self.statusBar().showMessage(tr("layout.loaded", count=len(loaded)))
@@ -1379,20 +1477,25 @@ class MainWindow(QMainWindow):
             return set()
         return excluded_labels(self.spec, tab=tab)
 
-    def _rebuild_designs(self) -> None:
+    def _compose_tabs(self, spec: SpecModel, engine: LayoutEngine) -> list[PassportTab]:
+        """Gegenereerde paspoorten met samenvoegingen en eigen namen. Eén plek voor lijst en bulkexport.
+        Generated passports with merges and custom names. One place for the list and the bulk export."""
+        merged = apply_merges(spec, engine, engine.build_all(), self.applied_merges)
+        return apply_renames(engine, merged, self.renames)
+
+    def _rebuild_designs(self, select: str | None = None) -> None:
         if self.spec is None:
             return
         if self.imported is not None:
             self._clear_import()
         current = self.current_tab()
-        previous = current.name if current else ""
+        previous = select if select is not None else (current.name if current else "")
         object_type = self.selected_object_type()
         self._preview = None
         self.engine = LayoutEngine(
             self.spec, LayoutOptions(only_flagged=self.only_included_check.isChecked(), profile=self.profile),
         )
-        base = self.engine.build_all()
-        self.tabs = apply_merges(self.spec, self.engine, base, self.applied_merges)
+        self.tabs = self._compose_tabs(self.spec, self.engine)
         self._update_suggestions()
         self._fill_filter_list(previous)
         index = self.type_combo.findData(object_type)
@@ -1404,11 +1507,17 @@ class MainWindow(QMainWindow):
         self.filter_list.blockSignals(True)
         self.filter_list.clear()
         for tab in self.tabs:
-            mark = " ⧉" if tab.merged_from else ""
-            self.filter_list.addItem(QListWidgetItem(f"{tab.name} ({len(tab.object_types)}){mark}"))
+            mark = " ⧉" if tab.merged_from else " ✎" if tab.original_name else ""
+            item = QListWidgetItem(f"{tab.name} ({len(tab.object_types)}){mark}")
+            tip = tr("list.tip", name=tab.name, count=len(tab.object_types))
+            if tab.original_name:
+                tip += "\n" + tr("rename.renamed_tip", name=tab.original_name)
+            item.setToolTip(tip)
+            self.filter_list.addItem(item)
         self.filter_list.blockSignals(False)
         names = [t.name for t in self.tabs]
         self.filter_list.setCurrentRow(names.index(previous) if previous in names else 0)
+        self._apply_list_search()
         self._on_filter_changed(self.filter_list.currentRow())
         self.bulk_panel.set_tabs(self.tabs)
 
@@ -1455,11 +1564,14 @@ class MainWindow(QMainWindow):
     def _on_merge_params_changed(self, *_args: object) -> None:
         self.settings.set("merge/threshold", self.threshold_spin.value())
         self.settings.set("merge/same_group", self.same_group_check.isChecked())
+        self._suggestion_names.clear()  # andere clusters: gekozen suggestienamen vervallen / other clusters
         self._update_suggestions()
 
     def _update_suggestions(self) -> None:
         """Bereken suggesties op de ongemerged filters; reeds toegepaste samenvoegingen verdwijnen uit de lijst.
-        Compute suggestions on the unmerged filters; already applied merges disappear from the list."""
+        Gekozen suggestienamen blijven bij dezelfde ledenset behouden.
+        Compute suggestions on the unmerged filters; already applied merges disappear from the list. Chosen
+        suggestion names are kept for the same member set."""
         self.suggestions = []
         if self.spec is not None and self.engine is not None:
             applied = {m for _, members in self.applied_merges for m in members}
@@ -1467,7 +1579,18 @@ class MainWindow(QMainWindow):
                 self.spec, self.engine, self.threshold_spin.value() / 100, self.same_group_check.isChecked(),
             )
             self.suggestions = [s for s in found if not applied & set(s.members)]
+            known = {frozenset(s.members) for s in self.suggestions}
+            self._suggestion_names = {k: v for k, v in self._suggestion_names.items() if k in known}
+            for suggestion in self.suggestions:
+                chosen = self._suggestion_names.get(frozenset(suggestion.members))
+                if chosen and chosen != suggestion.name:
+                    self._set_suggestion_name(suggestion, chosen)
         self._fill_merge_tree()
+
+    def _set_suggestion_name(self, suggestion: MergeSuggestion, name: str) -> None:
+        suggestion.name = name
+        if self.spec is not None and self.engine is not None:
+            suggestion.tab = merged_tab(self.spec, self.engine, suggestion.members, name)
 
     def _fill_merge_tree(self) -> None:
         self.merge_tree.clear()
@@ -1529,16 +1652,188 @@ class MainWindow(QMainWindow):
         if suggestion is None:
             return
         self.applied_merges.append((suggestion.name, list(suggestion.members)))
+        self._drop_renames_of(suggestion.members)
         self._rebuild_designs()
         self._report_merge(suggestion.name)
+
+    def _drop_renames_of(self, members: list[str]) -> None:
+        """Hernoemingen van filters die in een samenvoeging opgaan vervallen. / Renames of filters that are absorbed
+        by a merge are dropped."""
+        for member in members:
+            self.renames.pop(member, None)
+
+    # --- paspoort hernoemen / renaming a passport -------------------------------------------------------------
+
+    def _apply_list_search(self, *_args: object) -> None:
+        """Verberg paspoorten die niet bij de zoektekst passen (rijen blijven gelijk aan ``self.tabs``). / Hide
+        passports that do not match the search text (rows stay aligned with ``self.tabs``)."""
+        needle = self.filter_search.text().strip().casefold()
+        for row in range(self.filter_list.count()):
+            item = self.filter_list.item(row)
+            if item is not None:
+                item.setHidden(bool(needle) and needle not in self.tabs[row].name.casefold())
+
+    def _update_rename_state(self) -> None:
+        """Hernoemen kan bij precies één gekozen paspoort in het gegenereerde ontwerp. / Renaming works for exactly
+        one selected passport in the generated design."""
+        count = len(self.filter_list.selectedItems())
+        self.rename_action.setEnabled(count == 1 and self.imported is None and self.spec is not None)
+
+    def rename_current_tab(self) -> None:
+        """Bewerken → Paspoort hernoemen… (F2): het ene gekozen paspoort. / Edit → Rename passport… (F2)."""
+        rows = [self.filter_list.row(i) for i in self.filter_list.selectedItems()]
+        if len(rows) != 1:
+            self.statusBar().showMessage(tr("rename.pick_one"))
+            return
+        self._rename_row(rows[0])
+
+    def _rename_dialog_for(self, tab: PassportTab) -> RenameDialog:
+        """Bouw de dialoog zonder die te tonen. / Build the dialog without showing it."""
+        existing = {t.name for t in self.tabs if t.name != tab.name}
+        return RenameDialog(tab.name, existing, self, original=tab.original_name)
+
+    def _rename_row(self, row: int) -> None:
+        if self.imported is not None:
+            self.statusBar().showMessage(tr("rename.imported_disabled"))
+            return
+        if not 0 <= row < len(self.tabs):
+            return
+        tab = self.tabs[row]
+        dialog = self._rename_dialog_for(tab)
+        if self._exec_dialog(dialog) == QDialog.DialogCode.Accepted:
+            self.rename_tab(tab.name, dialog.new_name())
+
+    def rename_tab(self, old: str, new: str) -> bool:
+        """Hernoem het paspoort ``old`` naar ``new``: migreert markeringen en indeling, met ongedaan maken. Geeft
+        False bij een ongeldige of ongewijzigde naam. Rename passport ``old`` to ``new``: migrates marks and layout,
+        with undo. Returns False for an invalid or unchanged name."""
+        new = new.strip()
+        tab = next((t for t in self.tabs if t.name == old), None)
+        if self.imported is not None:
+            self.statusBar().showMessage(tr("rename.imported_disabled"))
+            return False
+        if tab is None or new == old:
+            return False
+        error = validate_rename(new, old, {t.name for t in self.tabs if t.name != old})
+        if error:
+            self.statusBar().showMessage(tr(error))
+            return False
+        self._push_undo("undo.rename")
+        if tab.merged_from:
+            # De naam van een samenvoeging zit in de samenvoeging zelf. / A merge's name lives in the merge itself.
+            self.applied_merges = [(new if n == old else n, m) for n, m in self.applied_merges]
+        else:
+            generated = original_name(tab)
+            if new == generated:
+                self.renames.pop(generated, None)
+            else:
+                self.renames[generated] = new
+        self._migrate_override(old, new)
+        current = self.current_tab()
+        self._schedule_save()
+        self._rebuild_designs(select=new if current is None or current.name == old else current.name)
+        if new == original_name(tab) and not tab.merged_from:
+            self.statusBar().showMessage(tr("rename.reset_done", old=old, new=new))
+        else:
+            self.statusBar().showMessage(tr("rename.done", old=old, new=new))
+        return True
+
+    def _migrate_override(self, old: str, new: str) -> None:
+        """Verplaats markeringen en indeling naar de nieuwe naam; de opslagsleutel volgt via ``_stored_name``.
+        Move marks and layout to the new name; the store key follows through ``_stored_name``."""
+        stored = self.overrides.pop(old, None)
+        if stored is not None:
+            self.overrides[new] = stored
+
+    def _reset_renames(self) -> None:
+        """Wis alle hernoemingen en zet de markeringen terug onder de gegenereerde namen. / Clear all renames and put
+        the marks back under the generated names."""
+        for generated, custom in self.renames.items():
+            self._migrate_override(custom, generated)
+        self.renames.clear()
 
     def _show_filter_menu(self, pos: QPoint) -> None:
         """Contextmenu van de paspoortlijst. / Context menu of the passport list."""
         menu = QMenu(self)
+        item = self.filter_list.itemAt(pos)
+        row = self.filter_list.row(item) if item is not None else -1
+        if 0 <= row < len(self.tabs) and item is not None and self.imported is None:
+            if not item.isSelected():
+                self.filter_list.setCurrentRow(row)
+            rename = menu.addAction(tr("action.rename_tab"))
+            if rename is not None:
+                rename.triggered.connect(lambda _checked=False, r=row: self._rename_row(r))
+            if self.tabs[row].original_name:
+                reset = menu.addAction(tr("action.reset_tab_name"))
+                if reset is not None:
+                    reset.triggered.connect(lambda _checked=False, r=row: self._reset_row_name(r))
+            menu.addSeparator()
         menu.addAction(self.merge_selected_action)
         viewport = self.filter_list.viewport()
         if viewport is not None:
             menu.exec(viewport.mapToGlobal(pos))
+
+    def _reset_row_name(self, row: int) -> None:
+        if 0 <= row < len(self.tabs) and self.tabs[row].original_name:
+            tab = self.tabs[row]
+            self.rename_tab(tab.name, tab.original_name)
+
+    # --- samenvoegadvies: hernoemen / merge advice: renaming --------------------------------------------------
+
+    def _show_merge_menu(self, pos: QPoint) -> None:
+        """Contextmenu van de samenvoegsuggesties: voorbeeld, hernoemen, toepassen. / Context menu of the merge
+        suggestions: preview, rename, apply."""
+        item = self.merge_tree.itemAt(pos)
+        if item is None:
+            return
+        self.merge_tree.setCurrentItem(item)
+        menu = QMenu(self)
+        for key, slot, enabled in (
+            ("merge.menu_preview", self.preview_merge, True),
+            ("rename.suggestion_button", self.rename_suggestion, self.imported is None),
+            ("merge.menu_apply", self.apply_selected_merge, self.imported is None),
+        ):
+            action = menu.addAction(tr(key))
+            if action is not None:
+                action.setEnabled(enabled)
+                action.triggered.connect(lambda _checked=False, s=slot: s())
+        viewport = self.merge_tree.viewport()
+        if viewport is not None:
+            menu.exec(viewport.mapToGlobal(pos))
+
+    def _suggestion_taken(self, suggestion: MergeSuggestion) -> set[str]:
+        """Namen die de suggestie niet mag krijgen: andere suggesties en paspoorten buiten de ledenset. / Names the
+        suggestion may not get: other suggestions and passports outside the member set."""
+        others = {s.name for s in self.suggestions if s is not suggestion}
+        return others | self._taken_names(list(suggestion.members))
+
+    def rename_suggestion(self) -> None:
+        """Hernoem de gekozen samenvoegsuggestie vóór het toepassen. / Rename the chosen merge suggestion before
+        applying it."""
+        if self._merge_blocked():
+            return
+        suggestion = self._selected_suggestion()
+        if suggestion is None:
+            return
+        dialog = RenameDialog(
+            suggestion.name, self._suggestion_taken(suggestion), self, title_key="rename.title_suggestion",
+        )
+        if self._exec_dialog(dialog) == QDialog.DialogCode.Accepted:
+            self.set_suggestion_name(suggestion, dialog.new_name())
+
+    def set_suggestion_name(self, suggestion: MergeSuggestion, name: str) -> bool:
+        name = name.strip()
+        error = validate_rename(name, suggestion.name, self._suggestion_taken(suggestion))
+        if error:
+            self.statusBar().showMessage(tr(error))
+            return False
+        if name == suggestion.name:
+            return False
+        self._suggestion_names[frozenset(suggestion.members)] = name
+        self._set_suggestion_name(suggestion, name)
+        self._fill_merge_tree()
+        self.statusBar().showMessage(tr("rename.suggestion_done", name=name))
+        return True
 
     def _expand_members(self, names: list[str]) -> list[str]:
         """Vervang samengevoegde paspoorten door hun filters. / Replace merged passports by their filters."""
@@ -1546,7 +1841,7 @@ class MainWindow(QMainWindow):
         members: list[str] = []
         for name in names:
             tab = by_name.get(name)
-            for member in (tab.merged_from if tab and tab.merged_from else [name]):
+            for member in (tab.merged_from if tab and tab.merged_from else [original_name(tab) if tab else name]):
                 if member not in members:
                     members.append(member)
         return members
@@ -1554,7 +1849,7 @@ class MainWindow(QMainWindow):
     def _taken_names(self, members: list[str]) -> set[str]:
         """Bestaande paspoortnamen, zonder de samen te voegen paspoorten. / Existing names minus those being merged."""
         merging = set(members) | {t.name for t in self.tabs if t.merged_from and set(t.merged_from) & set(members)}
-        return {t.name for t in self.tabs if t.name not in merging}
+        return {t.name for t in self.tabs if t.name not in merging and original_name(t) not in merging}
 
     def _merge_dialog_for(self, names: list[str]) -> MergeDialog | None:
         """Bouw de samenvoegdialoog zonder die te tonen. / Build the merge dialog without showing it."""
@@ -1575,6 +1870,7 @@ class MainWindow(QMainWindow):
         members = self._expand_members(names)
         self.applied_merges = [m for m in self.applied_merges if not set(m[1]) & set(members)]
         self.applied_merges.append((name, members))
+        self._drop_renames_of(members)
         self._rebuild_designs()
         for row, tab in enumerate(self.tabs):
             if tab.name == name:
@@ -1628,6 +1924,13 @@ class MainWindow(QMainWindow):
         self._update_minimal_state()
         self.undo_action.setEnabled(bool(self._undo_stack))
         self.redo_action.setEnabled(bool(self._redo_stack))
+        self.undo_action.setText(
+            tr("undo.named", what=tr(self._undo_stack[-1].label)) if self._undo_stack else tr("verify.undo"),
+        )
+        self.redo_action.setText(
+            tr("redo.named", what=tr(self._redo_stack[-1].label)) if self._redo_stack else tr("layout.redo"),
+        )
+        self._update_rename_state()
         self.sheet_preview.editable = base is not None and not self.selected_object_type()
         marks, legend = self._minimal_info(shown, self.selected_object_type())
         self.mockup.show_tab(
@@ -1798,7 +2101,7 @@ class MainWindow(QMainWindow):
             engine, tabs = self.engine, self.tabs
         else:
             engine = LayoutEngine(spec, LayoutOptions(only_flagged=options.only_included, profile=self.profile))
-            tabs = apply_merges(spec, engine, engine.build_all(), self.applied_merges)
+            tabs = self._compose_tabs(spec, engine)
         by_name = {t.name: t for t in tabs}
 
         def render(job: ExportJob) -> QPixmap:

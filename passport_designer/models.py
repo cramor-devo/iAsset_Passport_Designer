@@ -227,6 +227,9 @@ class PassportTab:
     merged_from: list[str] = field(default_factory=list)  # oorspronkelijke filters / original filters
     data_gaps: list[str] = field(default_factory=list)  # objecttypen zonder attributen / types without attributes
     profile: DesignProfile = DEFAULT_PROFILE
+    # Gegenereerde naam als de gebruiker het tabblad hernoemde ("" = niet hernoemd) / generated name when the user
+    # renamed the tab ("" = not renamed)
+    original_name: str = ""
 
     def applicable(self, label: str, object_type: str) -> bool:
         """Geldt het veld voor dit objecttype? (voetnoot-velden gelden voor een deel)

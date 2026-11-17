@@ -101,12 +101,21 @@ Het logbestand staat in `%LOCALAPPDATA%\iAssetPassportDesigner\passport_designer
    samengevoegd paspoort** bekijk je een voorstel, met **Samenvoegen toepassen** voeg je de filters samen en met
    **Samenvoegmatrix exporteren…** sla je een matrix van velden × objecttypen op.
    Je kunt ook handmatig samenvoegen: selecteer twee of meer paspoorten in de lijst (Ctrl/Shift+klik) en kies
-   **Bestand → Geselecteerde paspoorten samenvoegen…** (**Ctrl+M**, ook in het contextmenu en als **Selectie
+   **Bewerken → Geselecteerde paspoorten samenvoegen…** (**Ctrl+M**, ook in het contextmenu en als **Selectie
    samenvoegen…** op het tabblad Samenvoegadvies). Dat werkt ongeacht filter, groep of drempel van het advies. Geef het
    nieuwe paspoort een naam (verplicht, maximaal 50 tekens, uniek). Verschillen de paspoorten in beheergroep of
    filter, dan toont het venster die verschillen en moet je het uitdrukkelijk bevestigen (Annuleren is de standaard).
    Een handmatige samenvoeging maak je net als andere samenvoegingen ongedaan; bij een ingelezen ontwerp is ze niet
    beschikbaar.
+   **Een paspoort hernoemen:** selecteer het en druk op **F2** (of dubbelklik, rechtermuisknop → **Paspoort
+   hernoemen…**, of **Bewerken → Paspoort hernoemen…**). De naam moet uniek zijn (hoofdletterongevoelig) en maximaal 50
+   tekens; als Excel-tabbladnaam wordt hij in de export tot 31 tekens ingekort, met een melding in het venster.
+   Markeringen, verwijderingen en indeling gaan mee, een hernoemd paspoort toont ✎ en zijn originele naam in de
+   tooltip, en **Paspoortnaam herstellen** (contextmenu) zet de naam terug. Op het tabblad Samenvoegadvies hernoem je
+   een suggestie vóór het toepassen met **Suggestie hernoemen…** (knop of rechtermuisknop, naast Voorbeeld en
+   Toepassen). Hernoemingen gelden alleen in de sessie (zoals samenvoegingen) en vervallen bij nieuwe specificaties;
+   **Bewerken → Hernoemen ongedaan maken** gaat een stap terug. Met het zoekvak boven de paspoortlijst filter je lange
+   lijsten.
 5. Kies **Bestand → Paspoort-veld-ID-bestand laden…** om een export van `GET /diverse-fields` te laden: de V2-paspoort-diverse-veldenlijst (bijv. `passport field list.csv`,
    CSV met puntkomma `id;label;name;type;values;…`; JSON en xlsx met label/name en id werken ook). Elk paspoortveld
    krijgt de `id` van het diverse veld met dezelfde label. Het iAsset-veldencatalogus-xlsx uit de GUI (met de tabbladen
@@ -121,7 +130,7 @@ Het logbestand staat in `%LOCALAPPDATA%\iAssetPassportDesigner\passport_designer
    naslagbladen `Bron Objecttypen` en `Bron Attributen` (de specificatieregels van de geëxporteerde objecttypen, met
    bronbestand en datum) en een verborgen blad `_designer` met metagegevens (versie, profiel, specificatiebestanden,
    filterkolom, tabblad → objecttypen).
-8. **Bestand → Veld-ID's controleren…** controleert de paspoortvelden **offline** tegen de geladen veld-ID's: het
+8. **Controle → Veld-ID's controleren…** controleert de paspoortvelden **offline** tegen de geladen veld-ID's: het
    programma roept iAsset nooit aan. Laad eerst een opgeslagen V2 `GET /diverse-fields`-JSON of het
    veldencatalogus-xlsx uit de iAsset-GUI. Het venster toont per veld of het ID gevonden of ontbreekt, of label of
    veldtype afwijkt en of het veld is ingeschakeld voor het subthema van elk objecttype (op naam gekoppeld; dat vraagt
@@ -136,7 +145,7 @@ Het logbestand staat in `%LOCALAPPDATA%\iAssetPassportDesigner\passport_designer
    zodat screenshots schoon blijven. **Bestand → Terug naar gegenereerd ontwerp** brengt je terug naar het
    gegenereerde ontwerp. Bij een ingelezen ontwerp kun je geen geselecteerde paspoorten samenvoegen en niet per
    objecttype exporteren.
-10. **Bestand → Annotaties controleren/repareren…** controleert een verfijnd Excel-bestand tegen de specificatie:
+10. **Controle → Annotaties controleren/repareren…** controleert een verfijnd Excel-bestand tegen de specificatie:
     `(n)`-markeringen die niet kloppen, dubbele nummers, gaten en `Opmerkingen`-regels die niet kloppen. Alleen de
     markeringen bij Object informatie worden gecontroleerd. **Repareren → _fixed.xlsx** schrijft
     `<naam>_fixed.xlsx` met een eigen nummer per veld in leesvolgorde en de `Opmerkingen`-tekst naast de juiste
@@ -170,7 +179,7 @@ overslaan / Annuleren**. Mislukte afbeeldingen staan in het verslag, met **Map o
 ### Aanbevolen werkwijze
 
 1. Exporteer het Excel-ontwerp (**Bestand → Excel-ontwerp exporteren…**) en werk het uit in Excel.
-2. Draai **Bestand → Annotaties controleren/repareren…** en gebruik de `_fixed.xlsx`-kopie.
+2. Draai **Controle → Annotaties controleren/repareren…** en gebruik de `_fixed.xlsx`-kopie.
 3. Importeer het met **Bestand → Bijgewerkt Excel-ontwerp importeren…** en bekijk het tabblad **Vergelijking**.
 4. Maak een screenshot met **Bestand → Mockup als PNG exporteren…** (markeren uit voor een schoon resultaat).
 
@@ -179,10 +188,11 @@ overslaan / Annuleren**. Mislukte afbeeldingen staan in het verslag, met **Map o
 | Actie | Sneltoets |
 |---|---|
 | Paspoort-veld-ID-bestand laden… | Ctrl+I |
-| Veld-ID's controleren… | Ctrl+Shift+D |
+| Veld-ID's controleren… (menu Controle) | Ctrl+Shift+D |
 | Bijgewerkt Excel-ontwerp importeren… | Ctrl+Shift+I |
-| Annotaties controleren/repareren… | Ctrl+Shift+A |
-| Geselecteerde paspoorten samenvoegen… | Ctrl+M |
+| Annotaties controleren/repareren… (menu Controle) | Ctrl+Shift+A |
+| Geselecteerde paspoorten samenvoegen… (menu Bewerken) | Ctrl+M |
+| Paspoort hernoemen… (menu Bewerken) | F2 |
 | Excel-ontwerp exporteren… | Ctrl+E |
 | Excel-ontwerp per objecttype exporteren… | Ctrl+Shift+E |
 | Mockup als PNG exporteren… | Ctrl+P |
