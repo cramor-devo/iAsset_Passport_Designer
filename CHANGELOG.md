@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.5.1 (unreleased)
+## 0.5.1 - 2026-11-17
 - Added: **rename a passport.** Select it and press **F2**, double-click it, or use right-click → **Rename passport…** or **Edit → Rename passport…**. The name must be unique (case-insensitive, also against other passports; a duplicate is blocked) and at most 50 characters; a name longer than 31 characters or with `[]:*?/\` is shortened as an Excel sheet name, with a note in the dialog. Marks, deletions and layout move with the passport (and are stored under the generated name, so they are found again on the next start); the Mockup, Design sheet, payload, Excel, PNG and bulk exports use the new name. A renamed passport shows ✎ and its original name in the tooltip; **Reset passport name** (context menu) restores it. Renaming a merged passport changes the name of the merge. Renames are session-only, like merges, and are cleared when new specifications are opened or the filter column changes.
 - Added: on the **Merge suggestions** tab, **Rename suggestion…** (button and right-click menu with Preview / Rename / Apply) changes the name before you apply a merge. The chosen name is kept while the suggestions stay the same and is dropped when the threshold or same-group option changes.
 - Changed: menus. **Merge selected passports…** (Ctrl+M) moved from File to Edit, next to the new **Rename passport…**; **Check field IDs…** and **Check/fix annotations…** moved from File to the new **Tools** menu (Dutch: **Controle**); **Undo/Redo** are now at the top of Edit. Shortcuts are unchanged.
