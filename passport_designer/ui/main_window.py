@@ -99,12 +99,14 @@ from ..renaming import apply_renames, original_name, validate_rename
 from ..settings import AppSettings, data_dir
 from ..spec_reader import SpecError, read_spec
 from .annotation_dialog import AnnotationDialog
+from .block_controller import BlockController
 from .bulk_export_panel import BulkExportPanel, BulkOptions
 from .bulk_exporter import BulkExporter, ExportReport
 from .crossref_panel import CrossRefPanel
 from .id_check_dialog import IdCheckDialog
 from .merge_dialog import MergeDialog
 from .mockup import PassportMockup, render_tab_pixmap
+from .relation_block_dialog import BlockManagerDialog
 from .rename_dialog import RenameDialog
 from .restore_dialog import RestoreDialog
 from .settings_dialog import PayloadSettingsDialog
@@ -177,6 +179,7 @@ class MainWindow(QMainWindow):
         self.overrides: dict[str, TabOverride] = {}
         self._undo_stack: list[_State] = []
         self._redo_stack: list[_State] = []
+        self.blocks = BlockController(self)
         # Alle bewaarde indelingen (ook van andere profielen), sleutel 'profiel|paspoortnaam'; automatisch bewaard
         # na 500 ms rust. / All stored layouts (other profiles too), key 'profile|passport name'; autosaved after
         # 500 ms of rest.
@@ -246,6 +249,7 @@ class MainWindow(QMainWindow):
         self.sheet_preview.add_section_requested.connect(self._on_add_section)
         self.sheet_preview.rename_section_requested.connect(self._on_rename_section)
         self.sheet_preview.reset_requested.connect(self._on_reset_layout)
+        self.sheet_preview.blocks_requested.connect(self.open_block_manager)
         self.views.addTab(self.sheet_preview, "")
         self.views.addTab(self._build_payload_tab(), "")
         self.validation_list = QListWidget()
@@ -482,6 +486,7 @@ class MainWindow(QMainWindow):
         self.merge_selected_action = self._action("action.merge_selected", self.merge_selected, "Ctrl+M")
         self.rename_action = self._action("action.rename_tab", self.rename_current_tab, "F2")
         self.rename_action.setEnabled(False)
+        self.relation_blocks_action = self._action("action.relation_blocks", self.open_block_manager, "Ctrl+B")
         # Bewerken: eerst ongedaan maken, dan velden, dan de paspoortenset / Edit: undo first, then fields, then the
         # set of passports
         self.edit_menu.addAction(self.undo_action)
@@ -491,6 +496,7 @@ class MainWindow(QMainWindow):
             self.edit_menu.addAction(action)
         self.edit_menu.addSeparator()
         self.edit_menu.addAction(self.rename_action)
+        self.edit_menu.addAction(self.relation_blocks_action)
         self.edit_menu.addAction(self.merge_selected_action)
 
         self.payload_settings_action = self._action("action.payload_settings", self.edit_payload_settings)
@@ -1283,6 +1289,18 @@ class MainWindow(QMainWindow):
     def _on_reset_layout(self) -> None:
         self._change_override(reset_layout)
         self.statusBar().showMessage(tr("layout.reset_done"))
+
+    def block_manager_for(self) -> BlockManagerDialog:
+        """Eén plek om de blokkendialoog te maken (tests gebruiken deze). / Single place to build the blocks dialog
+        (tests use it)."""
+        return BlockManagerDialog(self.blocks, self)
+
+    def open_block_manager(self) -> None:
+        """Bewerken → Relatieblokken…: relatieblokken toevoegen en standaardblokken hernoemen. / Edit → Relation
+        blocks…: add relation blocks and rename standard blocks."""
+        if not self._require_tabs() or self.current_tab() is None:
+            return
+        self._exec_dialog(self.block_manager_for())
 
     # --- indeling: bewaren / layout: persistence -------------------------------------------------------------
 

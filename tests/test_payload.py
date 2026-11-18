@@ -157,7 +157,7 @@ def _tab_2894() -> PassportTab:
         Section("Basis", rows=_rows("Nummer|Naam|Objecttype|Thema")),
         Section("Object informatie", rows=_rows("a|b|c|d", "", "e|f|g|h", "i|j (2)")),
         Section("Borden aan drager (Sem.Rel)", rows=_rows("Nummer|Objecttype"), repeater=True),
-        Section("Constructielagen (Sem.Rel)", rows=_rows("Laagnummer"), repeater=True),
+        Section("Constructielagen (Sem.Rel)", rows=_rows("Laagnummer"), repeater=True, element=23),
         Section("Actoren en rollen (Sem.Rel)",
                 rows=[*_rows("Rol|Rol gedetailleerd|Actor|Actor Gedetailleerd"), ell], repeater=True),
         Section("Memo (Sem.Rel)", rows=[*_rows("Nummer|Memo veld"), [Cell("…"), Cell("…")]], repeater=True),
@@ -232,7 +232,8 @@ def test_section_element_classification():
 
     assert code("Memo (Sem.Rel)") == 19 and code("Is beschreven door") == 19
     assert code("Actoren en rollen") == 11 and code("Geometrie") == 4
-    assert code("Constructielagen (Sem.Rel)", profile=ROTTERDAM_V3) == 23
+    # 0.5.5: gekozen relatietype (Section.element) wint; geen vaste road/sign-profielsecties meer
+    assert section_element(Section("Constructielagen (Sem.Rel)", repeater=True, element=23), ROTTERDAM_V3) == 23
     assert code("Bestaat uit") == 23 and code("Eindpunt") == 27
     assert code("Onbekend (Sem.Rel)", repeater=True) == 18
     assert code("Locatie informatie") == 10

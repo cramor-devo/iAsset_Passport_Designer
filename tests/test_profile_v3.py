@@ -3,6 +3,7 @@ Tests for the 'rotterdam_v3' profile (manually tuned end result) and the compari
 
 from __future__ import annotations
 
+import pytest
 from conftest import make_spec
 from openpyxl import load_workbook
 
@@ -56,22 +57,35 @@ def test_repeater_sections_and_semantic_style(wave1_spec):
     assert sections["Geometrie"].style is SectionStyle.PLAIN
 
 
-def test_relation_sections_follow_the_filters(wave1_spec):
-    bord = [s.title for s in v3_tab(wave1_spec, "Bord").sections]
-    verharding = [s.title for s in v3_tab(wave1_spec, "Verharding").sections]
-    assert "Drager informatie (Sem. rel)" in bord and "Drager informatie (Sem. rel)" not in verharding
-    assert "Constructielagen (Sem.Rel)" in verharding
-    assert bord.index("Drager informatie (Sem. rel)") < bord.index("Actoren en rollen (Sem.Rel)")
+def test_default_profile_builds_no_road_or_sign_relation_blocks(wave1_spec):
+    assert ROTTERDAM_V3.relations == ()
+    titles = {s.title for s in v3_tab(wave1_spec, "Bord").sections}
+    assert not titles & {"Drager informatie (Sem. rel)", "Constructielagen (Sem.Rel)", "Wegvakonderdeel (Sem.Rel)"}
 
 
-def test_optional_fixed_fields_only_when_attribute_exists(wave1_spec):
+@pytest.mark.parametrize(
+    "name", ["Constructie", "Blok", "Markering", "Paal", "Hek", "Muur", "Constructieonderdeel", "Paalconstructie",
+             "Waterinrichtingsobject", "Straatmeubilair", "Weginrichtingsobject"],
+)
+def test_wave1_filter_names_never_get_road_or_sign_blocks(name):
+    spec = SpecModel()
+    spec.object_types = [ObjectType("Rioolbuis", name, "Riolering")]
+    spec.attributes = {"Rioolbuis": ["diameter"]}
+    titles = [s.title for s in v3_tab(spec, name).sections]
+    assert not any(t.startswith(("Wegvakonderdeel", "Borden aan drager")) for t in titles)
+    assert [t for t in titles if t.endswith("(Sem.Rel)")] == [
+        "Gekoppelde objecten (Sem.Rel)", "Actoren en rollen (Sem.Rel)", "Inwinningsinformatie (Sem.Rel)",
+        "Memo (Sem.Rel)",
+    ]
+
+
+def test_wegcategorie_is_object_information_not_beleidsinformatie(wave1_spec):
     spec = wave1_spec
-    without = v3_tab(spec, "Bord").sections
-    beleid = next(s for s in without if s.title == "Beleidsinformatie")
-    assert [c.label for c in beleid.rows[0]] == ["structuurniveau", "structuurgebied", "kwaliteitsniveau", "bestemming"]
     spec.attributes["APV-bord"].append("wegcategorie duurzaam veilig")
-    beleid = next(s for s in v3_tab(spec, "Bord").sections if s.title == "Beleidsinformatie")
-    assert len(beleid.rows[0]) == 5
+    tab = v3_tab(spec, "Bord")
+    beleid = next(s for s in tab.sections if s.title == "Beleidsinformatie")
+    assert [c.label for c in beleid.rows[0]] == ["structuurniveau", "structuurgebied", "kwaliteitsniveau", "bestemming"]
+    assert "wegcategorie duurzaam veilig" in {c.label for r in tab.sections[1].rows for c in r}
 
 
 def test_object_type_without_attributes_inherits_from_parent_name():
@@ -187,8 +201,26 @@ def test_no_generated_row_is_wider_than_five_fields(wave1_spec):
     assert ROTTERDAM_V3.grid_columns == 5
 
 
-def test_borden_aan_drager_applies_to_waterinrichtingsobject():
-    from passport_designer.profiles import ROTTERDAM_V3
+def test_optional_fixed_fields_only_when_attribute_exists(wave1_spec):
+    from dataclasses import replace
 
-    sections = ROTTERDAM_V3.relations_for(["Waterinrichtingsobject"])
-    assert "Borden aan drager" in [r.title for r in sections]
+    from passport_designer.profiles import FixedSection
+
+    section = FixedSection("Overige", (("a", "b"),), optional=frozenset({"b"}))
+    profile = replace(ROTTERDAM_V3, after_object=(section,))
+    engine = LayoutEngine(wave1_spec, LayoutOptions(profile=profile))
+    assert [c.label for c in engine._fixed(section, set()).rows[0]] == ["a"]
+    assert [c.label for c in engine._fixed(section, {"b"}).rows[0]] == ["a", "b"]
+
+
+def test_loader_keeps_working_for_a_user_relations_file(tmp_path):
+    from passport_designer.profiles import load_relations
+
+    path = tmp_path / "rel.json"
+    path.write_text(
+        '{"sections": [{"title": "X (Sem.Rel)", "rows": [["a"]], "filters": ["F"], "element": 20}]}',
+        encoding="utf-8",
+    )
+    sections = load_relations(path)
+    assert sections[0].element_id == 20 and sections[0].filters == frozenset({"F"})
+    assert load_relations(tmp_path / "missing.json") == ()

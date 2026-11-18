@@ -212,8 +212,10 @@ class Section:
     margin: dict[int, str] = field(default_factory=dict)
     # Door de gebruiker toegevoegde sectie (Ontwerpblad, slepen en neerzetten) / section added by the user
     added: bool = False
-
-
+    # iAsset-elementcode (field_type 2) als de gebruiker de sectie hernoemde of een relatieblok maakte; 0 = afleiden
+    # uit de titel. / iAsset element code (field_type 2) when the user renamed the section or made a relation block;
+    # 0 = derive from the title.
+    element: int = 0
 @dataclass
 class PassportTab:
     """Paspoorttabblad voor één filter. / Passport tab for one filter."""

@@ -537,6 +537,9 @@ class PassportMockup(QFrame):
                 if "nummer" in cell.label.casefold():
                     value = QLabel(f"<u>{NOT_APPLICABLE}</u>")
                     value.setObjectName("mockLink")
+                elif cell.sample:
+                    value = QLabel(cell.sample)
+                    value.setObjectName("mockSample")
                 else:
                     value = QLabel("–")
                     value.setObjectName("mockDash")

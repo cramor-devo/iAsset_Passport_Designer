@@ -210,6 +210,22 @@ Kies een profiel via **Instellingen → Ontwerpprofiel**:
 - **Original (Paspoortinrichting_obv_Filter)**. Dit is de indeling van het oorspronkelijke script: vier kolommen, een
   sectie "Beheer informatie" en notities onderaan.
 
+### Relatieblokken (0.5.5)
+
+Het standaardontwerp bevat de wave-1 weg-/bordrelatieblokken (bijv. *Constructielagen*, *Wegvak informatie*) niet meer en
+*wegcategorie duurzaam veilig* is uit *Beleidsinformatie* verdwenen. Voeg de blokken die u nodig hebt zelf toe met
+**Bewerken → Relatieblokken…** (Ctrl+B, of rechtsklik in het Ontwerpblad):
+
+- **Toevoegen** van een relatieblok: geef het een naam, kies het relatietype (17–23; vink het selectievakje aan voor
+  24–27), stel het aantal herhalingen in en maximaal 5 kolomlabels met optionele voorbeeldgegevens. Het gekozen type is
+  het elementtype in de API-payload.
+- **Standaardblokken hernoemen** (Memo, Actoren en rollen, Gekoppelde objecten, Inwinningsinformatie): titel,
+  kolomlabels en voorbeeldgegevens. **Standaard herstellen** maakt het ongedaan.
+- Kies het bereik **dit paspoort** of **alle paspoorten**. Blokken horen bij één paspoort, zodat een naam nooit
+  doorlekt naar een ander paspoort.
+- Alles is ongedaan te maken (Ctrl+Z) en wordt met de indeling van het paspoort bewaard. De payload bevat geen
+  template-`visibilities`.
+
 ### Hulpprogramma's voor de opdrachtregel
 
 Vergelijk het gegenereerde ontwerp met een handmatig bewerkt Excel-bestand (recall en precisie per tabblad):
@@ -219,7 +235,7 @@ python -m passport_designer.compare --spec wave1.xlsx --manual handmatig.xlsx
 ```
 
 Haal de relatiesecties (Sem.Rel) uit zo'n bestand en schrijf ze naar
-`passport_designer/data/rotterdam_v3_relations.json`:
+`passport_designer/data/rotterdam_v3_relations.json` (dit bestand is sinds 0.5.5 standaard leeg):
 
 ```text
 python tools/extract_relations.py handmatig.xlsx

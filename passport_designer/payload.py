@@ -66,6 +66,8 @@ def _is_iasset_id(label: str) -> bool:
 
 def _classify(section: Section, profile: DesignProfile | None) -> tuple[int, bool]:
     """(element-code, aangenomen?) / (element code, assumed?)."""
+    if section.element:  # door de gebruiker gekozen of behouden type / type chosen or kept by the user
+        return section.element, False
     title = _norm_title(section.title)
     if title.startswith("memo") or title == "is beschreven door":
         return ELEMENT_MEMO, False

@@ -233,8 +233,9 @@ def test_fresh_merged_export_has_no_findings_in_relation_sections(tmp_path, wave
     tab = merged_tab(wave1_spec, engine, ["Bord", "Verharding"], "Combi")
     assert "aanlegjaar" in {c.label.lower() for s in tab.sections for r in s.rows for c in r if c.footnote}
     path = export_workbook([tab], tmp_path / "merged.xlsx", spec=wave1_spec)
+    # 0.5.5: geen standaard relatiesecties meer / no default relation sections any more
     relation = [s for s in tab.sections if s.title.startswith(("Constructielagen", "Wegvak informatie"))]
-    assert relation  # relatiesecties met veldnamen als 'aanlegjaar' / relation sections with names like 'aanlegjaar'
+    assert not relation
     report = check_annotations(path, wave1_spec)
     assert report.ok and not [i for i in report.issues if i.severity in ("error", "warning")]
     result = fix_annotations(path, wave1_spec)
