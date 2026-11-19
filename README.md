@@ -199,6 +199,20 @@ Choose a profile under **Settings → Design profile**:
 - **Original (Paspoortinrichting_obv_Filter)**. This is the layout of the original script: four columns, a
   "Beheer informatie" section and notes at the bottom.
 
+### Relation blocks (0.5.5)
+
+The default design no longer contains the wave-1 road/sign relation blocks (e.g. *Constructielagen*, *Wegvak informatie*)
+and *wegcategorie duurzaam veilig* is gone from *Beleidsinformatie*. Add the blocks you need yourself with
+**Edit → Relation blocks…** (Ctrl+B, or right-click in the Design sheet):
+
+- **Add** a relation block: name it, choose the relation type (17–23; tick the checkbox for 24–27), set the number of
+  repeats and up to 5 column labels with optional sample data. The chosen type is the element type in the API payload.
+- **Rename the standard blocks** (Memo, Actoren en rollen, Gekoppelde objecten, Inwinningsinformatie): title, column labels
+  and sample data. **Reset to standard** undoes it.
+- Choose the scope **this passport** or **all passports**. Blocks belong to one passport, so a name never leaks to another.
+- Everything is undoable (Ctrl+Z) and is saved with the layout of the passport. The payload does not contain template
+  `visibilities`.
+
 ### Command-line tools
 
 Compare the generated design with a manually edited workbook (recall and precision per sheet):
@@ -208,7 +222,7 @@ python -m passport_designer.compare --spec wave1.xlsx --manual handmatig.xlsx
 ```
 
 Extract the relation sections (Sem.Rel) from such a workbook into
-`passport_designer/data/rotterdam_v3_relations.json`:
+`passport_designer/data/rotterdam_v3_relations.json` (this file is empty by default since 0.5.5):
 
 ```text
 python tools/extract_relations.py handmatig.xlsx

@@ -172,9 +172,12 @@ def sheet_layout(
                 mark = None if is_notes else minimal.get(key)
                 is_verify = not is_notes and key in verify
                 colour = VERIFY_COLOUR if is_verify else (MUTED_COLOUR if is_muted else "")
+                # Voorbeeldtekst van een herhaalbaar blok staat vanaf de tweede rij in het ontwerp.
+                # Sample text of a repeatable block shows from the second row on in the design.
+                text = cell.sample if section.repeater and row_index and cell.sample else cell.display
                 cells.append(
                     SheetCell(
-                        row, column, cell.display, bold=bold, italic=is_muted, colour=colour,
+                        row, column, text, bold=bold, italic=is_muted, colour=colour,
                         wrap=True, merge_to=merge_to, key="" if is_notes else key,
                         ref=CellRef(index, row_index, column - 1) if movable else None,
                         fill=mark.colours[0] if mark and len(mark.colours) == 1 else "",

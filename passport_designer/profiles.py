@@ -42,8 +42,12 @@ class FixedSection:
 
 @dataclass(frozen=True)
 class RelationSection:
-    """Sectie voor een semantische relatie (bijv. 'Wegvakonderdeel (Sem.Rel)') die bij bepaalde filters hoort.
-    Section for a semantic relation (e.g. 'Wegvakonderdeel (Sem.Rel)') that belongs to certain filters."""
+    """Sectie voor een semantische relatie die bij bepaalde filters hoort. Sinds 0.5.5 levert het profiel er geen meer
+    (``data/rotterdam_v3_relations.json`` is leeg); een eigen bestand kan ze nog laden. Relatieblokken maakt de
+    gebruiker per paspoort (``relation_blocks``).
+    Section for a semantic relation that belongs to certain filters. Since 0.5.5 the profile ships none
+    (``data/rotterdam_v3_relations.json`` is empty); a custom file can still load them. Users create relation blocks
+    per passport (``relation_blocks``)."""
 
     title: str
     rows: tuple[tuple[str, ...], ...]
@@ -164,8 +168,7 @@ ROTTERDAM_V3 = DesignProfile(
         ),
         FixedSection(
             "Beleidsinformatie",
-            (("structuurniveau", "structuurgebied", "kwaliteitsniveau", "bestemming", "wegcategorie duurzaam veilig"),),
-            optional=frozenset({"wegcategorie duurzaam veilig"}),
+            (("structuurniveau", "structuurgebied", "kwaliteitsniveau", "bestemming"),),
         ),
         # Lijst met gekoppelde objecten, één kolom; de inhoud verschilt per objecttype.
         # List of linked objects, one column; the content differs per object type.

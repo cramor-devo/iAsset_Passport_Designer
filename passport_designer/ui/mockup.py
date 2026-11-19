@@ -443,7 +443,11 @@ class PassportMockup(QFrame):
             top.addWidget(button)
         outer.addLayout(top)
         outer.addWidget(self._separator())
-        sample = section_element(section, tab.profile) != ELEMENT_MEMO and bool(cells)
+        # Memo-blokken tonen alleen voorbeeldrijen als een cel expliciete voorbeeldtekst heeft.
+        # Memo blocks only show sample rows when a cell has explicit sample text.
+        sample = bool(cells) and (
+            section_element(section, tab.profile) != ELEMENT_MEMO or any(c.sample for c in cells)
+        )
         columns = QWidget()
         grid = self._new_grid(columns, [0, *stretch])
         grid.setHorizontalSpacing(10)
@@ -534,7 +538,11 @@ class PassportMockup(QFrame):
             grid.setContentsMargins(0, 6, 0, 6)
             grid.addWidget(self._checkbox(), 0, 0)
             for column, cell in enumerate(cells, start=1):
-                if "nummer" in cell.label.casefold():
+                # Expliciete voorbeeldtekst gaat voor de n.v.t.-plaatshouder. / Explicit sample beats the placeholder.
+                if cell.sample:
+                    value = QLabel(cell.sample)
+                    value.setObjectName("mockSample")
+                elif "nummer" in cell.label.casefold():
                     value = QLabel(f"<u>{NOT_APPLICABLE}</u>")
                     value.setObjectName("mockLink")
                 else:

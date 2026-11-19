@@ -254,3 +254,26 @@ def test_legend_chips_present(tab):
     assert colours[-1] == MDS_COMMON
     mockup.show_tab(tab, "", DARK)
     assert not mockup.findChildren(QLabel, "mockLegendChip")
+
+
+def _sample_tab(element_title: str, columns: tuple[str, str]) -> PassportTab:
+    section = Section(
+        element_title, rows=[[Cell(columns[0], sample="NR-1"), Cell(columns[1])]], repeater=True,
+    )
+    return PassportTab("Drager", "", [], [section], profile=ROTTERDAM_V3)
+
+
+def test_explicit_sample_wins_over_the_not_applicable_placeholder_in_nummer_columns(app):
+    mockup = PassportMockup()
+    mockup.show_tab(_sample_tab("Drager informatie (Sem.Rel)", ("Nummer", "Naam")), "", DARK)
+    assert [x.text() for x in mockup.findChildren(QLabel, "mockSample")] == ["NR-1"] * 3
+    assert not mockup.findChildren(QLabel, "mockLink")
+
+
+def test_memo_block_with_explicit_samples_renders_sample_rows(app):
+    mockup = PassportMockup()
+    mockup.show_tab(_sample_tab("Memo (Sem.Rel)", ("Memo veld", "Nummer")), "", DARK)
+    memo = mockup.findChildren(QWidget, "mockTable")[0]
+    assert len(memo.findChildren(QWidget, "mockTableRow")) == 3
+    assert [x.text() for x in memo.findChildren(QLabel, "mockSample")] == ["NR-1"] * 3
+    assert not memo.findChildren(QLabel, "mockNoData")

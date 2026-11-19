@@ -8,6 +8,14 @@ from collections.abc import Iterable
 from dataclasses import dataclass, replace
 
 from .models import Cell, PassportTab, Section, SectionStyle, norm
+from .relation_blocks import (
+    RELATION_TYPES,
+    BlockEdit,
+    RelationBlock,
+    apply_blocks,
+    block_title_error,
+    normalised_block,
+)
 
 MAX_SECTION_TITLE = 60  # tekens in een nieuwe sectietitel / characters in a new section title
 LAYOUT_VERSION = 1
@@ -69,10 +77,15 @@ class TabOverride:
     deleted: frozenset[str] = frozenset()
     layout: tuple[SectionLayout, ...] | None = None
     known: frozenset[str] = frozenset()
+    # Relatieblokken en hernoemde standaardblokken (zie relation_blocks) / relation blocks and renamed standard blocks
+    blocks: tuple[RelationBlock, ...] = ()
+    block_edits: tuple[tuple[str, BlockEdit], ...] = ()
 
     @property
     def is_empty(self) -> bool:
-        return not self.verify and not self.deleted and self.layout is None
+        return (
+            not self.verify and not self.deleted and self.layout is None and not self.blocks and not self.block_edits
+        )
 
 
 def _keys(labels: Iterable[str]) -> frozenset[str]:
@@ -130,6 +143,7 @@ def apply_override(
     Copy of ``tab`` with the user layout and without the deleted fields (rows close up, empty rows and sections
     disappear), plus the marked field names that occur in it. Fields in repeatable sections stay. ``keep_empty``:
     keep empty sections (so that fields can be dragged into them)."""
+    tab = apply_blocks(tab, override.blocks, override.block_edits)
     if override.layout is not None:
         tab = apply_layout(tab, override, keep_empty=keep_empty)[0]
     present = set(tab_labels(tab))
@@ -400,12 +414,154 @@ def reset_layout(override: TabOverride) -> TabOverride:
     return replace(override, layout=None, known=frozenset())
 
 
+# --- relatieblokken en hernoemde standaardblokken / relation blocks and renamed standard blocks ----------------
+
+
+def _retitle_layout(override: TabOverride, old: str, new: str) -> TabOverride:
+    """Zet de titel van een vast blok ook in de bewaarde indeling om, zodat het zijn plek behoudt.
+    Also rename a fixed block in the stored layout so that it keeps its place."""
+    if override.layout is None or old == new:
+        return override
+    layout = tuple(replace(s, title=new) if s.fixed and s.title == old else s for s in override.layout)
+    return replace(override, layout=layout)
+
+
+def _checked_block(block: RelationBlock, existing: set[str], current: str = "") -> RelationBlock:
+    block = normalised_block(block)
+    if block.element not in RELATION_TYPES or not block.columns:
+        raise LayoutRefused("invalid")
+    if block_title_error(block.title, existing, current):
+        raise LayoutRefused("title")
+    return block
+
+
+def add_block(override: TabOverride, *, block: RelationBlock, existing_titles: set[str]) -> TabOverride:
+    """Voeg een relatieblok toe aan dit paspoort. ``existing_titles``: de titels die het paspoort nu toont.
+    Add a relation block to this passport. ``existing_titles``: the titles the passport shows now."""
+    block = _checked_block(block, existing_titles)
+    result = replace(override, blocks=(*override.blocks, block))
+    if result.layout is not None:
+        # Ook een hernoemd 'Actoren en rollen' (via block_edits) is het ankerblok. / A renamed 'Actoren en rollen'
+        # (via block_edits) is the anchor block too.
+        renamed = {norm(e.title) for k, e in result.block_edits if k.startswith("actoren en rollen") and e.title}
+        at = next(
+            (
+                i for i, s in enumerate(result.layout)
+                if s.fixed and (norm(s.title).startswith("actoren en rollen") or norm(s.title) in renamed)
+            ),
+            next((i for i, s in enumerate(result.layout) if s.style is SectionStyle.NOTES), len(result.layout)),
+        )
+        entry = SectionLayout(block.title, SectionStyle.SEMANTIC, fixed=True)
+        result = replace(result, layout=(*result.layout[:at], entry, *result.layout[at:]))
+    return result
+
+
+def update_block(
+    override: TabOverride, *, index: int, block: RelationBlock, existing_titles: set[str],
+) -> TabOverride:
+    """Wijzig relatieblok ``index`` (titel, type, kolommen, voorbeeldtekst). / Change relation block ``index``."""
+    if not 0 <= index < len(override.blocks):
+        raise LayoutRefused("invalid")
+    old = override.blocks[index]
+    block = _checked_block(block, existing_titles, current=old.title)
+    blocks = (*override.blocks[:index], block, *override.blocks[index + 1:])
+    return _retitle_layout(replace(override, blocks=blocks), old.title, block.title)
+
+
+def delete_block(override: TabOverride, *, index: int) -> TabOverride:
+    """Verwijder relatieblok ``index`` (ook uit de bewaarde indeling). / Delete relation block ``index`` (also from
+    the stored layout)."""
+    if not 0 <= index < len(override.blocks):
+        raise LayoutRefused("invalid")
+    gone = override.blocks[index]
+    result = replace(override, blocks=(*override.blocks[:index], *override.blocks[index + 1:]))
+    if result.layout is not None:
+        layout = tuple(s for s in result.layout if not (s.fixed and s.title == gone.title))
+        result = replace(result, layout=layout)
+    return result
+
+
+def move_block(override: TabOverride, *, index: int, delta: int) -> TabOverride:
+    """Verplaats relatieblok ``index`` ``delta`` plaatsen (-1 omhoog, 1 omlaag) t.o.v. de andere relatieblokken.
+    Move relation block ``index`` by ``delta`` places (-1 up, 1 down) relative to the other relation blocks."""
+    target = index + delta
+    if not (0 <= index < len(override.blocks) and 0 <= target < len(override.blocks)):
+        raise LayoutRefused("invalid")
+    blocks = list(override.blocks)
+    blocks[index], blocks[target] = blocks[target], blocks[index]
+    result = replace(override, blocks=tuple(blocks))
+    if result.layout is not None:
+        layout = list(result.layout)
+        spots = {s.title: i for i, s in enumerate(layout) if s.fixed}
+        a, b = spots.get(override.blocks[index].title), spots.get(override.blocks[target].title)
+        if a is not None and b is not None:
+            layout[a], layout[b] = layout[b], layout[a]
+            result = replace(result, layout=tuple(layout))
+    return result
+
+
+def block_edit_of(override: TabOverride, original_title: str) -> BlockEdit | None:
+    """De wijziging van het standaardblok met deze gegenereerde titel. / The change of the standard block with this
+    generated title."""
+    return dict(override.block_edits).get(norm(original_title))
+
+
+def set_block_edit(
+    override: TabOverride, *, original_title: str, edit: BlockEdit, existing_titles: set[str],
+) -> TabOverride:
+    """Hernoem een standaardblok (titel, kolomnamen, voorbeeldtekst); een lege wijziging herstelt het standaardblok.
+    Rename a standard block (title, column names, sample text); an empty change restores the standard block."""
+    previous = block_edit_of(override, original_title)
+    shown = (previous.title.strip() if previous else "") or original_title
+    clean = BlockEdit(
+        " ".join(edit.title.split()), tuple(" ".join(x.split()) for x in edit.labels),
+        tuple(" ".join(x.split()) for x in edit.samples),
+    )
+    if clean.is_empty:
+        return reset_block_edit(override, original_title=original_title, existing_titles=existing_titles)
+    if clean.title and block_title_error(clean.title, existing_titles, current=shown):
+        raise LayoutRefused("title")
+    key = norm(original_title)
+    kept = tuple((k, e) for k, e in override.block_edits if k != key)
+    result = replace(override, block_edits=(*kept, (key, clean)))
+    return _retitle_layout(result, shown, clean.title or original_title)
+
+
+def reset_block_edit(
+    override: TabOverride, *, original_title: str, existing_titles: set[str] | None = None,
+) -> TabOverride:
+    """Zet een standaardblok terug naar de standaard. Met ``existing_titles`` wordt de teruggezette titel gecontroleerd
+    (``LayoutRefused("title")`` bij een dubbele titel). Put a standard block back to the standard. With
+    ``existing_titles`` the restored title is validated (``LayoutRefused("title")`` on a duplicate)."""
+    previous = block_edit_of(override, original_title)
+    if previous is None:
+        return override
+    if existing_titles is not None and previous.title.strip() and block_title_error(
+        original_title, existing_titles, current=previous.title.strip(),
+    ):
+        raise LayoutRefused("title")
+    key = norm(original_title)
+    result = replace(override, block_edits=tuple((k, e) for k, e in override.block_edits if k != key))
+    return _retitle_layout(result, previous.title or original_title, original_title)
+
+
 # --- bestand en opslag / file and storage -----------------------------------------------------------------------
 
 
 def override_to_dict(override: TabOverride) -> dict[str, object]:
     """JSON-vriendelijke weergave van één paspoort. / JSON-friendly form of one passport."""
     data: dict[str, object] = {"verify": sorted(override.verify), "deleted": sorted(override.deleted)}
+    if override.blocks:
+        data["blocks"] = [
+            {"title": b.title, "element": b.element, "columns": list(b.columns), "samples": list(b.samples),
+             "repeat": b.repeat}
+            for b in override.blocks
+        ]
+    if override.block_edits:
+        data["block_edits"] = {
+            key: {"title": e.title, "labels": list(e.labels), "samples": list(e.samples)}
+            for key, e in override.block_edits
+        }
     if override.layout is not None:
         data["known"] = sorted(override.known)
         data["layout"] = [
@@ -434,9 +590,25 @@ def override_from_dict(data: object) -> TabOverride:
                 )
                 for s in raw
             )
+        blocks = tuple(
+            normalised_block(RelationBlock(
+                str(b["title"]), int(b["element"]), tuple(str(c) for c in b.get("columns", [])),
+                tuple(str(s) for s in b.get("samples", [])), int(b.get("repeat", 2)),
+            ))
+            for b in data.get("blocks", [])
+        )
+        if any(b.element not in RELATION_TYPES or not b.columns for b in blocks):
+            raise ValueError("relation block")
+        block_edits = tuple(
+            (str(key), BlockEdit(
+                str(e.get("title", "")), tuple(str(x) for x in e.get("labels", [])),
+                tuple(str(x) for x in e.get("samples", [])),
+            ))
+            for key, e in dict(data.get("block_edits", {})).items()
+        )
         return TabOverride(
             frozenset(str(v) for v in data.get("verify", [])), frozenset(str(v) for v in data.get("deleted", [])),
-            layout, frozenset(str(v) for v in data.get("known", [])),
+            layout, frozenset(str(v) for v in data.get("known", [])), blocks, block_edits,
         )
     except (AssertionError, KeyError, TypeError, ValueError, AttributeError) as exc:
         raise LayoutFileError("The layout data is not valid.") from exc

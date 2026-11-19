@@ -52,7 +52,7 @@ class SheetPreview(QTableWidget):
     add_section_requested = pyqtSignal(int)  # onder sectie / below section
     rename_section_requested = pyqtSignal(int)
     reset_requested = pyqtSignal()
-
+    blocks_requested = pyqtSignal()  # relatie- en standaardblokken bewerken / edit relation and standard blocks
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("sheetPreview")
@@ -159,12 +159,15 @@ class SheetPreview(QTableWidget):
             ("layout.rename_section", True, lambda: self.rename_section_requested.emit(section)),
             ("layout.delete_row", has_row, lambda: self.delete_row_requested.emit(section, row)),
             ("layout.reset", True, lambda: self.reset_requested.emit()),
+            ("action.relation_blocks", True, lambda: self.blocks_requested.emit()),
         ]
         for key, applies, callback in entries:
-            action = menu.addAction(tr(key))
+            action = menu.addAction(tr(key).replace("&", ""))
             if action is None:
                 continue
-            action.setEnabled(enabled and (applies or key == "layout.reset"))
+            action.setEnabled(
+                self.editable if key == "action.relation_blocks" else enabled and (applies or key == "layout.reset"),
+            )
             action.triggered.connect(lambda _checked=False, c=callback: c())
 
     def contextMenuEvent(self, event) -> None:  # type: ignore[no-untyped-def]  # noqa: N802
