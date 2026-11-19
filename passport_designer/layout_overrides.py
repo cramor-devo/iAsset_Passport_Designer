@@ -441,8 +441,14 @@ def add_block(override: TabOverride, *, block: RelationBlock, existing_titles: s
     block = _checked_block(block, existing_titles)
     result = replace(override, blocks=(*override.blocks, block))
     if result.layout is not None:
+        # Ook een hernoemd 'Actoren en rollen' (via block_edits) is het ankerblok. / A renamed 'Actoren en rollen'
+        # (via block_edits) is the anchor block too.
+        renamed = {norm(e.title) for k, e in result.block_edits if k.startswith("actoren en rollen") and e.title}
         at = next(
-            (i for i, s in enumerate(result.layout) if s.fixed and norm(s.title).startswith("actoren en rollen")),
+            (
+                i for i, s in enumerate(result.layout)
+                if s.fixed and (norm(s.title).startswith("actoren en rollen") or norm(s.title) in renamed)
+            ),
             next((i for i, s in enumerate(result.layout) if s.style is SectionStyle.NOTES), len(result.layout)),
         )
         entry = SectionLayout(block.title, SectionStyle.SEMANTIC, fixed=True)
@@ -512,7 +518,7 @@ def set_block_edit(
         tuple(" ".join(x.split()) for x in edit.samples),
     )
     if clean.is_empty:
-        return reset_block_edit(override, original_title=original_title)
+        return reset_block_edit(override, original_title=original_title, existing_titles=existing_titles)
     if clean.title and block_title_error(clean.title, existing_titles, current=shown):
         raise LayoutRefused("title")
     key = norm(original_title)
@@ -521,11 +527,19 @@ def set_block_edit(
     return _retitle_layout(result, shown, clean.title or original_title)
 
 
-def reset_block_edit(override: TabOverride, *, original_title: str) -> TabOverride:
-    """Zet een standaardblok terug naar de standaard. / Put a standard block back to the standard."""
+def reset_block_edit(
+    override: TabOverride, *, original_title: str, existing_titles: set[str] | None = None,
+) -> TabOverride:
+    """Zet een standaardblok terug naar de standaard. Met ``existing_titles`` wordt de teruggezette titel gecontroleerd
+    (``LayoutRefused("title")`` bij een dubbele titel). Put a standard block back to the standard. With
+    ``existing_titles`` the restored title is validated (``LayoutRefused("title")`` on a duplicate)."""
     previous = block_edit_of(override, original_title)
     if previous is None:
         return override
+    if existing_titles is not None and previous.title.strip() and block_title_error(
+        original_title, existing_titles, current=previous.title.strip(),
+    ):
+        raise LayoutRefused("title")
     key = norm(original_title)
     result = replace(override, block_edits=tuple((k, e) for k, e in override.block_edits if k != key))
     return _retitle_layout(result, previous.title or original_title, original_title)

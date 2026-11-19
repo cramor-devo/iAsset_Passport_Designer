@@ -150,7 +150,7 @@ class BlockController:
 
     def reset_standard(self, entry: BlockEntry, *, all_passports: bool) -> bool:
         return self._apply(
-            lambda _t, o, _titles: reset_block_edit(o, original_title=entry.original_title),
+            lambda _t, o, titles: reset_block_edit(o, original_title=entry.original_title, existing_titles=titles),
             all_passports=all_passports, message="blocks.reset_done",
         )
 

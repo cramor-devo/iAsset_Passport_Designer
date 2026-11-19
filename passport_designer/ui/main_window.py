@@ -2047,7 +2047,8 @@ class MainWindow(QMainWindow):
                 if self._minimal_on() else None,
                 verify_by_tab=verify, deleted_by_tab=deleted,
                 layout_by_tab={
-                    t.name: override_to_dict(o) for t in self.tabs if (o := self.overrides.get(t.name)) and o.layout
+                    t.name: override_to_dict(o) for t in self.tabs
+                    if (o := self.overrides.get(t.name)) and (o.layout or o.blocks or o.block_edits)
                 },
             )
         except (OSError, ValueError) as exc:

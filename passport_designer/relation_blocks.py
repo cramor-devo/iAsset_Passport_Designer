@@ -139,6 +139,18 @@ def apply_blocks(
             section = _edit_section(section, edit, section.element or section_element(section, tab.profile))
         sections.append(section)
     if blocks:
+        # Een ingelezen ontwerp bevat de blokken al als sectie: dan alleen het relatietype herstellen (geen dubbel).
+        # An imported design already holds the blocks as a section: then only restore the type (no duplicate).
+        titles = {norm(s.title): i for i, s in enumerate(sections)}
+        fresh: list[RelationBlock] = []
+        for block in map(normalised_block, blocks):
+            at = titles.get(norm(block.title))
+            if at is None:
+                fresh.append(block)
+            else:
+                sections[at] = replace(sections[at], element=block.element)
+        blocks = tuple(fresh)
+    if blocks:
         index = next(
             (i for i, s in enumerate(sections) if s.repeater and (s.element or section_element(s)) == ELEMENT_ACTORS),
             None,

@@ -183,9 +183,8 @@ def test_reset_to_standard_restores_everything():
     )
     assert reset_block_edit(override, original_title=ACTORS).is_empty
     assert apply_override(tab, reset_block_edit(override, original_title=ACTORS))[0].sections == tab.sections
-    assert set_block_edit(
-        override, original_title=ACTORS, edit=BlockEdit(), existing_titles=_titles_set(tab),
-    ).is_empty
+    shown = _titles_set(apply_override(tab, override)[0])
+    assert set_block_edit(override, original_title=ACTORS, edit=BlockEdit(), existing_titles=shown).is_empty
 
 
 def test_standard_rename_keeps_place_in_layout_and_rejects_duplicates():
@@ -230,3 +229,57 @@ def test_file_with_invalid_relation_type_is_refused():
 def test_override_without_blocks_is_unchanged_behaviour():
     tab = _tab()
     assert apply_override(tab, TabOverride())[0] is tab
+
+
+# --- Copilot-review regressies / Copilot review regressions ---------------------------------------------------
+
+
+def test_imported_block_with_sample_stays_a_repeater_and_keeps_its_sample(tmp_path):
+    from passport_designer.excel_export import export_workbook
+    from passport_designer.refined_import import read_refined
+
+    tab = _tab()
+    block = _block("Bestaat uit (Sem.Rel)", 23, columns=("Nummer", "Naam"), samples=("", "Voorbeeld"))
+    shown = apply_override(tab, _with_block(tab, block))[0]
+    path = export_workbook([shown], tmp_path / "out.xlsx", spec=SpecModel())
+    section = next(s for s in read_refined(path).sheets[0].tab.sections if s.title == block.title)
+    assert section.repeater
+    assert [c.label for c in section.rows[0]] == ["Nummer", "Naam"]
+    assert [c.sample for c in section.rows[1]] == ["", "Voorbeeld"]
+
+
+def test_block_without_layout_is_exported_and_reapplied_once_with_its_type():
+    tab = _tab()
+    override = _with_block(tab, _block("Bestaat uit (Sem.Rel)", 23))
+    assert override.layout is None
+    imported = apply_override(tab, override)[0]  # wat een ingelezen blad al bevat / what an imported sheet holds
+    again = apply_override(imported, from_json(to_json({"k": override}))["k"])[0]
+    assert _titles(again).count("Bestaat uit (Sem.Rel)") == 1
+    assert ("Bestaat uit (Sem.Rel)", 23) in _body_elements(again)
+
+
+def test_block_added_to_layout_with_renamed_actors_goes_before_the_renamed_block():
+    tab = _tab()
+    override = set_block_edit(
+        with_capture(TabOverride(), tab), original_title=ACTORS, edit=BlockEdit("Betrokkenen"),
+        existing_titles=_titles_set(tab),
+    )
+    shown = apply_override(tab, override)[0]
+    override = add_block(override, block=_block(), existing_titles=_titles_set(shown))
+    titles = _titles(apply_override(tab, override)[0])
+    assert titles.index("Heeft deel (Sem.Rel)") == titles.index("Betrokkenen") - 1
+
+
+def test_reset_standard_block_refuses_a_title_that_is_taken_now():
+    tab = _tab()
+    memo = "Memo (Sem.Rel)"
+    override = set_block_edit(
+        TabOverride(), original_title=memo, edit=BlockEdit("Opmerkingen"), existing_titles=_titles_set(tab),
+    )
+    shown = _titles_set(apply_override(tab, override)[0])
+    override = add_block(override, block=_block(memo, 19), existing_titles=shown)
+    shown = _titles_set(apply_override(tab, override)[0])
+    with pytest.raises(LayoutRefused):
+        reset_block_edit(override, original_title=memo, existing_titles=shown)
+    with pytest.raises(LayoutRefused):  # leeg BlockEdit = reset / empty BlockEdit = reset
+        set_block_edit(override, original_title=memo, edit=BlockEdit(), existing_titles=shown)

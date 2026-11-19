@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -438,8 +438,24 @@ def _read_sheet(
                 result.margin_positions[(section_index, row_index)] = (row, margin)
     for section in tab.sections:
         section.repeater = _is_repeater(section)
+        if section.repeater:
+            _restore_samples(section)
     _finish(result, sheet, used_columns, margin, grid_end)
     return result
+
+
+def _restore_samples(section: Section) -> None:
+    """Rijen 2.. van een herhaalbaar blok met voorbeeldtekst worden weer ``Cell.sample`` van de kopcellen.
+    Rows 2.. of a repeatable block with sample text become ``Cell.sample`` of the header cells again."""
+    rows = [i for i, r in enumerate(section.rows) if r]
+    head = section.rows[rows[0]]
+    for index in rows[1:-1]:
+        row = section.rows[index]
+        if len(row) != len(head) or [c.label for c in row] == [h.label for h in head]:
+            continue
+        section.rows[index] = [
+            replace(h, sample=c.label if c.label != h.label else "") for h, c in zip(head, row, strict=True)
+        ]
 
 
 def _note(tab: PassportTab, text: str) -> None:
@@ -458,7 +474,15 @@ def _is_repeater(section: Section) -> bool:
     rows = [r for r in section.rows if r]
     if len(rows) < 2 or not all(set(c.label) <= ELLIPSIS_CHARS for c in rows[-1]):
         return False
-    return [c.label for c in rows[0]] == [c.label for c in rows[1]]
+    first, second = [c.label for c in rows[0]], [c.label for c in rows[1]]
+    if first == second:
+        return True
+    # Met voorbeeldtekst wijkt rij 2 af van de kopnamen; de tussenrijen zijn dan wel gelijk en even lang.
+    # With sample text row 2 differs from the header names; the middle rows are equal and of equal length.
+    return (
+        len(rows) > 2 and len(first) == len(second)
+        and all([c.label for c in r] == second for r in rows[1:-1])
+    )
 
 
 def _finish(result: RefinedSheet, sheet: Worksheet, used_columns: int, margin: int | None, grid_end: int) -> None:
