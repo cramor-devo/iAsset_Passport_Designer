@@ -19,8 +19,8 @@ The interface is available in English and Dutch (**View → Language**).
 
 ## Download (Windows)
 
-Download `iAsset_Passport_Designer_vX.Y.Z.exe` (for example `iAsset_Passport_Designer_v0.5.0.exe`) from the latest [release](../../releases). It is a single file and does not
-need Python. The executable is not code-signed, so Windows SmartScreen may show a warning the first time you start it.
+Download `iAsset_Passport_Designer_vX.Y.Z.exe` (for example `iAsset_Passport_Designer_v0.5.0.exe`) from the latest
+[release](../../releases). It is a single file and does not need Python. The executable is not code-signed, so Windows SmartScreen may show a warning the first time you start it.
 
 To build the executable yourself, run:
 
@@ -85,15 +85,8 @@ The log file is stored at `%LOCALAPPDATA%\iAssetPassportDesigner\passport_design
    undoes the last change. Deleted fields leave the payload, the views and the exports and are listed on the Validation
    tab; fields in repeatable sections cannot be deleted. **View → Show "verify with customer" marks** hides the red
    colour. Importing a refined Excel recognises red text and the green fill `92D050` as marks. Marks and deletions are
-   not remembered between sessions yet. **Delete all red fields in all passports** (Edit menu) removes every red field
-   from every passport in one step (asks first; one **Ctrl+Z** undoes it), handy after importing a refined Excel.
-   **Extra fields requested by customers:** mark fields as **Edit → Mark: extra field (customer request)**
-   (**Ctrl+Shift+E**, also in the right-click menu). They turn blue in the Design sheet and the Excel exports (red wins
-   over blue); blue text in an imported refined Excel is recognised as extra again.
-   **Object types:** **Edit → Object types…** (**Ctrl+T**) moves one or more object types to another passport (fields,
-   footnotes and annotations follow) or deletes them from the passport. A passport keeps at least one type;
-   **Restore all** undoes the changes, which are session-only like merges and renames and are unavailable for an
-   imported refined Excel.
+   saved per passport and specification and restored on the next start. See
+   [Editing passports](#editing-passports) for bulk deletion, extra fields and object types.
    **Design profiles:** *Rotterdam v3* has at most 5 fields per row and includes *Gekoppelde objecten (Sem.Rel)*,
    *Inwinningsinformatie (Sem.Rel)*, a *Datum* column in Memo, *Distributiegebied*/*Stroomgebied* in Locatie informatie
    and *Beheerobjectomschrijving* in Overige informatie. When importing a refined Excel, text beside the grid is read as
@@ -151,6 +144,23 @@ The log file is stored at `%LOCALAPPDATA%\iAssetPassportDesigner\passport_design
     `Opmerkingen` text beside the right rows. Layout and styling stay untouched and the original file is not changed.
     The tool warns if the sheet contains drawings.
 
+### Editing passports
+
+All of these are in the **Edit** menu and covered by **Ctrl+Z** / **Ctrl+Y**.
+
+- **Delete all red fields in all passports** removes every red (verify) field from every passport in one step. It
+  asks first and one **Ctrl+Z** undoes it. This is handy after importing a refined Excel in which the customer has
+  marked unwanted fields in red.
+- **Mark: extra field (customer request)** (**Ctrl+Shift+X**, also in the Design sheet right-click menu) marks fields
+  that were missing from the Unafact specification but that customers asked for. They turn **blue** in the Design
+  sheet and the Excel exports; red (verify) wins over blue. Blue text in an imported refined Excel is recognised as
+  extra again, and the `_designer` sheet records them as `extra`.
+- **Object types…** (**Ctrl+T**) lists the object types of the selected passport. Select one or more and
+  **Move to passport…** (another existing passport) or **Delete from passport**. Fields, footnotes and annotations
+  are recalculated. A passport always keeps at least one object type, and **Restore all** undoes every move and
+  deletion. These changes last for the session only (like merges and renames) and are not available while a refined
+  Excel is imported.
+
 ### Reordering fields
 
 In the **Design sheet** tab you can drag a field to another place: in the same row, in another row or in another
@@ -196,7 +206,7 @@ in the report, with **Open folder**.
 | Only fields with Opnemen = "Ja" (View menu) | Ctrl+Alt+O |
 | Highlight minimal dataset (View menu) | Ctrl+Shift+M |
 | Mark: verify with customer (Edit menu) | Ctrl+Shift+V |
-| Mark: extra field (Edit menu) | Ctrl+Shift+E |
+| Mark: extra field (Edit menu) | Ctrl+Shift+X |
 | Object types… (Edit menu) | Ctrl+T |
 | Delete field / Undo / Redo field change (Edit menu) | Del / Ctrl+Z / Ctrl+Y |
 
