@@ -764,6 +764,21 @@ def test_delete_all_marked_asks_first_and_cancel_keeps_fields(window, monkeypatc
         window.validation_list.count() - 1).text()
 
 
+def test_delete_all_red_fields_in_all_passports_is_one_undo_step(window, monkeypatch):
+    from PyQt6.QtWidgets import QMessageBox
+
+    _verify_window(window)
+    _select(window, "breedte")
+    window.mark_action.trigger()
+    monkeypatch.setattr(
+        QMessageBox, "question", staticmethod(lambda *_a: QMessageBox.StandardButton.Yes),
+    )
+    window.delete_marked_all_action.trigger()
+    assert _sheet_item(window, "breedte") is None
+    window.undo_action.trigger()
+    assert _sheet_item(window, "breedte") is not None
+
+
 def test_undo_restores_deleted_field_and_restore_dialog_lists_it(window, monkeypatch):
     from PyQt6.QtWidgets import QDialog
 

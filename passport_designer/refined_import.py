@@ -70,6 +70,8 @@ class RefinedSheet:
     # verwijderde velden uit '_designer'. / Normalised field names with red text or green fill (verify with customer)
     # and user-deleted fields from '_designer'.
     verify: set[str] = field(default_factory=set)
+    # Genormaliseerde veldnamen met blauwe letters (extra op klantverzoek) / normalised names with blue text (extra)
+    extra: set[str] = field(default_factory=set)
     deleted: list[str] = field(default_factory=list)
     # Door de gebruiker gemaakte indeling uit '_designer' (JSON-vorm van TabOverride) / user layout from '_designer'
     layout: dict[str, Any] | None = None
@@ -204,6 +206,24 @@ def _is_red(rgb: object) -> bool:
     except ValueError:
         return False
     return red >= 0xC0 and green <= 0x40 and blue <= 0x40
+
+
+def _is_blue(rgb: object) -> bool:
+    """Blauw: B >= 0xC0 en R, G <= 0x40 (ARGB of RGB). / Blue: B >= 0xC0 and R, G <= 0x40 (ARGB or RGB)."""
+    if not isinstance(rgb, str) or len(rgb) < 6:
+        return False
+    try:
+        red, green, blue = (int(rgb[-6:][i:i + 2], 16) for i in (0, 2, 4))
+    except ValueError:
+        return False
+    return blue >= 0xC0 and red <= 0x40 and green <= 0x40
+
+
+def _is_extra_cell(cell: Any) -> bool:
+    """Blauwe letters = extra veld op klantverzoek (niet in de specificatie). / Blue text = extra field requested by
+    the customer (not in the specification)."""
+    colour = cell.font.color.rgb if cell.font is not None and cell.font.color is not None else None
+    return _is_blue(colour)
 
 
 def _is_verify_cell(cell: Any) -> bool:
@@ -425,6 +445,8 @@ def _read_sheet(
             row_cells.append(Cell(label, footnote, annotation=annotation))
             if _is_verify_cell(sheet.cell(row=row, column=column)):
                 result.verify.add(norm(label))
+            elif _is_extra_cell(sheet.cell(row=row, column=column)):
+                result.extra.add(norm(label))
             result.positions[(section_index, row_index, len(row_cells) - 1)] = (row, column)
             result.label_positions.setdefault(norm(label.rstrip("*").strip()), (row, column))
             used_columns = max(used_columns, column)
@@ -499,6 +521,7 @@ def _finish(result: RefinedSheet, sheet: Worksheet, used_columns: int, margin: i
         result.margin_width = _widths(sheet, margin)[-1]
     sheet_meta = result.metadata or {}
     result.verify |= {norm(str(v)) for v in sheet_meta.get("verify", [])}
+    result.extra |= {norm(str(v)) for v in sheet_meta.get("extra", [])}
     result.deleted = [str(v) for v in sheet_meta.get("deleted", [])]
     raw_layout = sheet_meta.get("layout")
     result.layout = raw_layout if isinstance(raw_layout, dict) else None

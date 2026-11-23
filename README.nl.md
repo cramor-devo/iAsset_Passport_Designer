@@ -88,7 +88,16 @@ Het logbestand staat in `%LOCALAPPDATA%\iAssetPassportDesigner\passport_designer
    de payload, de weergaven en de exports en staan op het tabblad Validatie; velden in herhaalbare secties kunnen niet
    verwijderd worden. **Beeld → "Controleren met klant" tonen** verbergt de rode kleur. Bij het importeren van een
    verfijnd Excel-bestand gelden rode letters en de groene vulling `92D050` als markering. Markeringen en
-   verwijderingen worden nog niet tussen sessies onthouden.
+   verwijderingen worden nog niet tussen sessies onthouden. **Alle rode velden in alle paspoorten verwijderen**
+   (menu Bewerken) verwijdert alle rode velden uit alle paspoorten in één stap (vraagt eerst bevestiging; één
+   **Ctrl+Z** maakt het ongedaan), handig na het importeren van een verfijnd Excel-bestand.
+   **Extra velden op klantverzoek:** markeer velden met **Bewerken → Markeren: extra veld (klantverzoek)**
+   (**Ctrl+Shift+E**, ook in het rechtermuismenu). Ze worden blauw in het Ontwerpblad en de Excel-exports (rood gaat
+   voor blauw); blauwe letters in een geïmporteerd verfijnd Excel-bestand worden weer als extra herkend.
+   **Objecttypen:** **Bewerken → Objecttypen…** (**Ctrl+T**) verplaatst één of meer objecttypen naar een ander
+   paspoort (velden, voetnoten en annotaties volgen) of verwijdert ze uit het paspoort. Een paspoort houdt minstens één
+   type; **Alles herstellen** maakt de wijzigingen ongedaan. Ze gelden alleen voor de sessie, zoals samenvoegingen en
+   hernoemingen, en zijn niet beschikbaar bij een geïmporteerd verfijnd Excel-bestand.
    **Ontwerpprofielen:** *Rotterdam v3* heeft maximaal 5 velden per rij en bevat *Gekoppelde objecten (Sem.Rel)*,
    *Inwinningsinformatie (Sem.Rel)*, een kolom *Datum* in Memo, *Distributiegebied*/*Stroomgebied* in Locatie informatie
    en *Beheerobjectomschrijving* in Overige informatie. Bij het importeren van een verfijnd Excel-bestand wordt tekst
@@ -199,6 +208,8 @@ overslaan / Annuleren**. Mislukte afbeeldingen staan in het verslag, met **Map o
 | Alleen velden met Opnemen = "Ja" (menu Beeld) | Ctrl+Alt+O |
 | Minimale dataset markeren (menu Beeld) | Ctrl+Shift+M |
 | Markeren: controleren met klant (menu Bewerken) | Ctrl+Shift+V |
+| Markeren: extra veld (menu Bewerken) | Ctrl+Shift+E |
+| Objecttypen… (menu Bewerken) | Ctrl+T |
 | Veld verwijderen / Veldwijziging ongedaan maken (menu Bewerken) | Del / Ctrl+Z |
 
 ## Ontwerpprofielen

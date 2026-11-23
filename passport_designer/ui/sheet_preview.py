@@ -41,6 +41,7 @@ class SheetPreview(QTableWidget):
 
     # Velden zijn genormaliseerde namen. / Fields are normalised names.
     verify_toggled = pyqtSignal(list)  # markeren/ontmarkeren / toggle the mark
+    extra_toggled = pyqtSignal(list)  # extra (blauw) markeren/ontmarkeren / toggle the extra (blue) mark
     delete_requested = pyqtSignal(list)  # velden verwijderen / delete fields
     delete_marked_requested = pyqtSignal()  # alle gemarkeerde velden verwijderen / delete all marked fields
     restore_requested = pyqtSignal()  # verwijderde velden herstellen / restore deleted fields
@@ -73,7 +74,7 @@ class SheetPreview(QTableWidget):
 
     def show_tab(
         self, tab: PassportTab | None, *, muted: set[str] | None = None, minimal: dict[str, MinimalMark] | None = None,
-        legend: dict[str, str] | None = None, verify: set[str] | None = None,
+        legend: dict[str, str] | None = None, verify: set[str] | None = None, extra: set[str] | None = None,
     ) -> None:
         self.clearSpans()
         self.clear()
@@ -82,7 +83,7 @@ class SheetPreview(QTableWidget):
             self.setRowCount(0)
             self.setColumnCount(0)
             return
-        layout = sheet_layout(tab, muted=muted, minimal=minimal, legend=legend, verify=verify)
+        layout = sheet_layout(tab, muted=muted, minimal=minimal, legend=legend, verify=verify, extra=extra)
         self._layout = layout
         self.setRowCount(layout.row_count)
         self.setColumnCount(layout.column_count)
@@ -129,6 +130,10 @@ class SheetPreview(QTableWidget):
         menu = QMenu(self)
         mark = menu.addAction(tr("verify.mark"))
         delete = menu.addAction(tr("verify.delete"))
+        extra = menu.addAction(tr("extra.mark"))
+        if extra is not None:
+            extra.setEnabled(bool(labels))
+            extra.triggered.connect(lambda: self.extra_toggled.emit(labels))
         if mark is not None:
             mark.setEnabled(bool(labels))
             mark.triggered.connect(lambda: self.verify_toggled.emit(labels))

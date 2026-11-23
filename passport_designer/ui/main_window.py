@@ -7,7 +7,7 @@ import copy
 import hashlib
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -62,6 +62,7 @@ from ..layout_overrides import (
     deletable_labels,
     delete_empty_row,
     delete_fields,
+    extra_in,
     from_json,
     insert_row,
     move_cell,
@@ -71,6 +72,7 @@ from ..layout_overrides import (
     reset_layout,
     restore_fields,
     tab_labels,
+    toggle_extra,
     toggle_verify,
     with_capture,
 )
@@ -98,6 +100,7 @@ from ..refined_import import RefinedSheet, RefinedWorkbook, read_refined
 from ..renaming import apply_renames, original_name, validate_rename
 from ..settings import AppSettings, data_dir
 from ..spec_reader import SpecError, read_spec
+from ..type_edits import apply_type_edits
 from .annotation_dialog import AnnotationDialog
 from .block_controller import BlockController
 from .bulk_export_panel import BulkExportPanel, BulkOptions
@@ -112,6 +115,7 @@ from .restore_dialog import RestoreDialog
 from .settings_dialog import PayloadSettingsDialog
 from .sheet_preview import SheetPreview
 from .theme import PALETTES, app_stylesheet, qt_palette
+from .types_dialog import TypesDialog
 from .workers import Job, run_job
 
 log = logging.getLogger(__name__)
@@ -147,6 +151,8 @@ class _State:
     merges: list[tuple[str, list[str]]]
     selected: str
     label: str  # i18n-sleutel van de handeling / i18n key of the action
+    type_moves: dict[str, str] = field(default_factory=dict)
+    removed_types: frozenset[str] = frozenset()
 
 
 class MainWindow(QMainWindow):
@@ -169,6 +175,10 @@ class MainWindow(QMainWindow):
         # Eigen paspoortnamen: gegenereerde naam -> eigen naam; alleen in de sessie, zoals samenvoegingen.
         # Custom passport names: generated name -> custom name; session-only, like merges.
         self.renames: dict[str, str] = {}
+        # Verplaatste objecttypen (type -> doelpaspoort, gegenereerde naam) en verwijderde objecttypen; sessie-only.
+        # Moved object types (type -> target passport, generated name) and removed object types; session-only.
+        self.type_moves: dict[str, str] = {}
+        self.removed_types: set[str] = set()
         # Door de gebruiker gekozen suggestienamen, per ledenset (vervallen bij andere drempel).
         # Suggestion names chosen by the user, per member set (dropped when the threshold changes).
         self._suggestion_names: dict[frozenset[str], str] = {}
@@ -250,6 +260,8 @@ class MainWindow(QMainWindow):
         self.sheet_preview.rename_section_requested.connect(self._on_rename_section)
         self.sheet_preview.reset_requested.connect(self._on_reset_layout)
         self.sheet_preview.blocks_requested.connect(self.open_block_manager)
+        self.sheet_preview.extra_toggled.connect(lambda labels: self._change_override(
+            lambda o: toggle_extra(o, labels=labels)))
         self.views.addTab(self.sheet_preview, "")
         self.views.addTab(self._build_payload_tab(), "")
         self.validation_list = QListWidget()
@@ -476,8 +488,11 @@ class MainWindow(QMainWindow):
             self._language_actions[code] = action
 
         self.mark_action = self._action("verify.mark", self.mark_verify_selected, "Ctrl+Shift+V")
+        self.extra_action = self._action("extra.mark", self.mark_extra_selected, "Ctrl+Shift+E")
+        self.types_action = self._action("types.manage", self.open_types_dialog, "Ctrl+T")
         self.delete_action = self._action("verify.delete", self.delete_selected, "Del")
         self.delete_marked_action = self._action("verify.delete_marked", self.delete_all_marked)
+        self.delete_marked_all_action = self._action("verify.delete_marked_all", self.delete_all_marked_everywhere)
         self.restore_action = self._action("verify.restore", self.restore_dialog)
         self.undo_action = self._action("verify.undo", self.undo_override, QKeySequence.StandardKey.Undo)
         self.undo_action.setEnabled(False)
@@ -492,8 +507,13 @@ class MainWindow(QMainWindow):
         self.edit_menu.addAction(self.undo_action)
         self.edit_menu.addAction(self.redo_action)
         self.edit_menu.addSeparator()
-        for action in (self.mark_action, self.delete_action, self.delete_marked_action, self.restore_action):
+        for action in (
+            self.mark_action, self.extra_action, self.delete_action, self.delete_marked_action,
+            self.delete_marked_all_action, self.restore_action,
+        ):
             self.edit_menu.addAction(action)
+        self.edit_menu.addSeparator()
+        self.edit_menu.addAction(self.types_action)
         self.edit_menu.addSeparator()
         self.edit_menu.addAction(self.rename_action)
         self.edit_menu.addAction(self.relation_blocks_action)
@@ -655,6 +675,8 @@ class MainWindow(QMainWindow):
             self.spec = loaded
             self.applied_merges.clear()
             self.renames.clear()
+            self.type_moves.clear()
+            self.removed_types.clear()
             self._suggestion_names.clear()
             self._reset_overrides()
         else:
@@ -1064,6 +1086,8 @@ class MainWindow(QMainWindow):
         self.spec.filter_column = column
         self.settings.set("design/filter_column", column)
         self.applied_merges.clear()
+        self.type_moves.clear()
+        self.removed_types.clear()
         self._reset_renames()
         self._suggestion_names.clear()
         self._populate_columns()
@@ -1160,7 +1184,7 @@ class MainWindow(QMainWindow):
         tab = self.current_tab()
         return _State(
             dict(self.overrides), dict(self.renames), [(n, list(m)) for n, m in self.applied_merges],
-            tab.name if tab else "", label,
+            tab.name if tab else "", label, dict(self.type_moves), frozenset(self.removed_types),
         )
 
     def _push_undo(self, label: str) -> None:
@@ -1190,7 +1214,12 @@ class MainWindow(QMainWindow):
     def _restore(self, state: _State) -> None:
         """Zet een momentopname terug; bij andere namen worden de ontwerpen opnieuw opgebouwd. / Restore a snapshot;
         when names differ the designs are rebuilt."""
-        rebuild = state.renames != self.renames or state.merges != self.applied_merges
+        rebuild = (
+            state.renames != self.renames or state.merges != self.applied_merges
+            or state.type_moves != self.type_moves or state.removed_types != self.removed_types
+        )
+        self.type_moves = dict(state.type_moves)
+        self.removed_types = set(state.removed_types)
         self.overrides = dict(state.overrides)
         self.renames = dict(state.renames)
         self.applied_merges = [(n, list(m)) for n, m in state.merges]
@@ -1324,7 +1353,7 @@ class MainWindow(QMainWindow):
             except LayoutFileError:
                 log.warning("Layout metadata of sheet %s is not usable", sheet.name)
         verify = frozenset(sheet.verify) | stored.verify
-        result = replace(stored, verify=verify, deleted=frozenset())
+        result = replace(stored, verify=verify, deleted=frozenset(), extra=frozenset(sheet.extra) | stored.extra)
         return None if result.is_empty else result
 
     def _load_layouts(self) -> None:
@@ -1427,6 +1456,83 @@ class MainWindow(QMainWindow):
     def _selected_labels(self) -> list[str]:
         return self.sheet_preview.selected_labels()
 
+    def mark_extra_selected(self) -> None:
+        self._change_override(lambda o: toggle_extra(o, labels=self._selected_labels()))
+
+    def _extra_labels(self, tab: PassportTab | None) -> set[str]:
+        """Extra-gemarkeerde (blauwe) veldnamen die in het getoonde paspoort staan. / Extra-marked (blue) field names
+        in the shown passport."""
+        if tab is None:
+            return set()
+        return extra_in(self._effective(tab)[0] or tab, self.overrides.get(tab.name, TabOverride()))
+
+    def _export_extra(self) -> dict[str, set[str]]:
+        return {t.name: self._extra_labels(t) for t in self.tabs}
+
+    # --- objecttypen verplaatsen of verwijderen / move or delete object types -------------------------------
+
+    def open_types_dialog(self) -> None:
+        """Bewerken → Objecttypen…: objecttypen naar een ander paspoort verplaatsen of verwijderen. / Edit → Object
+        types…: move object types to another passport or delete them."""
+        tab = self.current_tab()
+        if not self._require_tabs() or tab is None or self.spec is None:
+            return
+        if self.imported is not None:
+            self._warn(tr("types.not_imported"))
+            return
+        targets = {t.name: original_name(t) for t in self.tabs if t is not tab and t.name != tab.name}
+        dialog = TypesDialog(tab.name, [o.name for o in tab.object_types], list(targets), self)
+        if self._exec_dialog(dialog) != QDialog.DialogCode.Accepted:
+            return
+        if dialog.action == "restore":
+            self.restore_types()
+        elif dialog.action == "move" and dialog.chosen():
+            self.move_types(dialog.chosen(), targets.get(dialog.target(), ""))
+        elif dialog.action == "delete" and dialog.chosen():
+            self.delete_types(dialog.chosen())
+
+    def _types_refused(self, names: list[str]) -> bool:
+        """Een paspoort houdt minstens één objecttype. / A passport keeps at least one object type."""
+        tab = self.current_tab()
+        if tab is None or len(set(names)) >= len(tab.object_types):
+            self.statusBar().showMessage(tr("types.last"))
+            return True
+        return False
+
+    def _change_types(self, moves: dict[str, str], removed: set[str], message: str, select: str) -> None:
+        self._push_undo("undo.types")
+        self.type_moves, self.removed_types = moves, removed
+        self._rebuild_designs(select=select)
+        self.statusBar().showMessage(message)
+
+    def move_types(self, names: list[str], target: str) -> None:
+        """Verplaats objecttypen naar het paspoort met (gegenereerde) naam ``target``. / Move object types to the
+        passport with (generated) name ``target``."""
+        tab = self.current_tab()
+        if tab is None or not target or not names or self._types_refused(names):
+            return
+        moves = {**self.type_moves, **{name: target for name in names}}
+        self._change_types(moves, set(self.removed_types), tr("types.moved", count=len(names), tab=target), tab.name)
+
+    def delete_types(self, names: list[str]) -> None:
+        tab = self.current_tab()
+        if tab is None or not names or self._types_refused(names):
+            return
+        answer = QMessageBox.question(
+            self, tr("app.title"), tr("types.confirm_delete", count=len(names), tab=tab.name),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel, QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        moves = {t: m for t, m in self.type_moves.items() if t not in names}
+        self._change_types(moves, self.removed_types | set(names), tr("types.deleted", count=len(names)), tab.name)
+
+    def restore_types(self) -> None:
+        if not self.type_moves and not self.removed_types:
+            return
+        tab = self.current_tab()
+        self._change_types({}, set(), tr("types.reset_done"), tab.name if tab else "")
+
     def mark_verify_selected(self) -> None:
         self._mark_labels(self._selected_labels())
 
@@ -1462,6 +1568,32 @@ class MainWindow(QMainWindow):
         )
         if answer == QMessageBox.StandardButton.Yes:
             self._change_override(lambda o: delete_fields(o, labels=present))
+
+    def delete_all_marked_everywhere(self) -> None:
+        """Verwijder alle rode (te controleren) velden uit alle paspoorten in één stap.
+        Delete all red (verify) fields from every passport in one step."""
+        pending: dict[str, set[str]] = {}
+        for tab in self.tabs:
+            override = self.overrides.get(tab.name, TabOverride())
+            present = deletable_labels(tab, override.verify & set(tab_labels(tab)))
+            if present:
+                pending[tab.name] = present
+        if not pending:
+            self.statusBar().showMessage(tr("verify.none_marked"))
+            return
+        count = sum(len(v) for v in pending.values())
+        answer = QMessageBox.question(
+            self, tr("app.title"), tr("verify.confirm_all", count=count, tabs=len(pending)),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel, QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self._push_undo("undo.field")
+        for name, labels in pending.items():
+            self.overrides[name] = delete_fields(self.overrides.get(name, TabOverride()), labels=labels)
+        self._schedule_save()
+        self._refresh_views()
+        self.statusBar().showMessage(tr("verify.deleted_all", count=count))
 
     def restore_dialog(self) -> None:
         tab = self.current_tab()
@@ -1499,6 +1631,7 @@ class MainWindow(QMainWindow):
         """Gegenereerde paspoorten met samenvoegingen en eigen namen. Eén plek voor lijst en bulkexport.
         Generated passports with merges and custom names. One place for the list and the bulk export."""
         merged = apply_merges(spec, engine, engine.build_all(), self.applied_merges)
+        merged = apply_type_edits(engine, merged, self.type_moves, self.removed_types)
         return apply_renames(engine, merged, self.renames)
 
     def _rebuild_designs(self, select: str | None = None) -> None:
@@ -1957,7 +2090,9 @@ class MainWindow(QMainWindow):
             entry.sheet.positions if entry and not modified else None,
             muted=muted, minimal=marks, legend=legend, verify=verify,
         )
-        self.sheet_preview.show_tab(shown, muted=muted, minimal=marks, legend=legend, verify=verify)
+        self.sheet_preview.show_tab(
+            shown, muted=muted, minimal=marks, legend=legend, verify=verify, extra=self._extra_labels(base),
+        )
         self.payload = build_tab_payload(tab, self.ids, self.options) if tab else None
         self._render_payload_text()
         self.validation_list.clear()
@@ -2045,7 +2180,7 @@ class MainWindow(QMainWindow):
                 only_included=self.only_included_check.isChecked(),
                 minimal_by_tab={t.name: self._minimal_info(self._effective(t)[0] or t) for t in self.tabs}
                 if self._minimal_on() else None,
-                verify_by_tab=verify, deleted_by_tab=deleted,
+                verify_by_tab=verify, deleted_by_tab=deleted, extra_by_tab=self._export_extra(),
                 layout_by_tab={
                     t.name: override_to_dict(o) for t in self.tabs
                     if (o := self.overrides.get(t.name)) and (o.layout or o.blocks or o.block_edits)
@@ -2069,15 +2204,18 @@ class MainWindow(QMainWindow):
         if not path:
             return
         verify, deleted = self._export_overrides()
+        extra = self._export_extra()
         pairs: list[tuple[PassportTab, str]] = []
         verify_by_name: dict[str, set[str]] = {}
         deleted_by_name: dict[str, set[str]] = {}
+        extra_by_name: dict[str, set[str]] = {}
         for tab in self.tabs:
             for o in tab.object_types:
                 single = self._single_tab(tab, o.name)
                 pairs.append((single, o.name))
                 verify_by_name[o.name] = verify.get(tab.name, set()) & set(tab_labels(single))
                 deleted_by_name[o.name] = deleted.get(tab.name, set())
+                extra_by_name[o.name] = extra.get(tab.name, set()) & set(tab_labels(single))
         try:
             export_workbook(
                 [tab for tab, _ in pairs], path, [name for _, name in pairs], spec=self.spec,
@@ -2086,7 +2224,7 @@ class MainWindow(QMainWindow):
                     {o.name: self._minimal_info(tab, o.name) for tab in self.tabs for o in tab.object_types}
                     if self._minimal_on() else None
                 ),
-                verify_by_tab=verify_by_name, deleted_by_tab=deleted_by_name,
+                verify_by_tab=verify_by_name, deleted_by_tab=deleted_by_name, extra_by_tab=extra_by_name,
             )
         except (OSError, ValueError) as exc:
             log.exception("Excel export failed")
