@@ -488,7 +488,7 @@ class MainWindow(QMainWindow):
             self._language_actions[code] = action
 
         self.mark_action = self._action("verify.mark", self.mark_verify_selected, "Ctrl+Shift+V")
-        self.extra_action = self._action("extra.mark", self.mark_extra_selected, "Ctrl+Shift+E")
+        self.extra_action = self._action("extra.mark", self.mark_extra_selected, "Ctrl+Shift+X")
         self.types_action = self._action("types.manage", self.open_types_dialog, "Ctrl+T")
         self.delete_action = self._action("verify.delete", self.delete_selected, "Del")
         self.delete_marked_action = self._action("verify.delete_marked", self.delete_all_marked)

@@ -2,7 +2,7 @@
 
 ## 0.5.6 - 2026-11-23
 - Added: **Edit → Object types…** (Ctrl+T). Move one or more object types to another passport (fields, footnotes and annotations are recalculated) or delete a single object type from a passport. A passport keeps at least one type; **Restore all** undoes it. Undo/Redo cover it; session-only like merges and renames, and not available for an imported refined Excel.
-- Added: **Edit → Mark: extra field (customer request)** (Ctrl+Shift+E, also in the Design sheet context menu). Extra fields turn blue in the Design sheet and the Excel exports (red "verify" wins), are stored in the layout and the `_designer` sheet (`extra`), and blue text in an imported refined Excel is recognised as extra.
+- Added: **Edit → Mark: extra field (customer request)** (Ctrl+Shift+X, also in the Design sheet context menu). Extra fields turn blue in the Design sheet and the Excel exports (red "verify" wins), are stored in the layout and the `_designer` sheet (`extra`), and blue text in an imported refined Excel is recognised as extra.
 - Added: **Edit → Delete all red fields in all passports**: removes every red (verify) field from all passports in one undoable step, after confirmation.
 
 ## 0.5.5 - 2026-11-20

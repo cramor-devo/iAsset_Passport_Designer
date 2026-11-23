@@ -19,8 +19,8 @@ De interface is beschikbaar in het Nederlands en het Engels (**Beeld → Taal**)
 
 ## Downloaden (Windows)
 
-Download `iAsset_Passport_Designer_vX.Y.Z.exe` (bijvoorbeeld `iAsset_Passport_Designer_v0.5.0.exe`) bij de nieuwste [release](../../releases). Het is één bestand en je hebt er
-geen Python voor nodig. Het programma is niet digitaal ondertekend, dus Windows SmartScreen kan bij de eerste keer
+Download `iAsset_Passport_Designer_vX.Y.Z.exe` (bijvoorbeeld `iAsset_Passport_Designer_v0.5.0.exe`) bij de nieuwste
+[release](../../releases). Het is één bestand en je hebt er geen Python voor nodig. Het programma is niet digitaal ondertekend, dus Windows SmartScreen kan bij de eerste keer
 starten een waarschuwing geven.
 
 Wil je het programma zelf bouwen? Gebruik dan:
@@ -88,16 +88,8 @@ Het logbestand staat in `%LOCALAPPDATA%\iAssetPassportDesigner\passport_designer
    de payload, de weergaven en de exports en staan op het tabblad Validatie; velden in herhaalbare secties kunnen niet
    verwijderd worden. **Beeld → "Controleren met klant" tonen** verbergt de rode kleur. Bij het importeren van een
    verfijnd Excel-bestand gelden rode letters en de groene vulling `92D050` als markering. Markeringen en
-   verwijderingen worden nog niet tussen sessies onthouden. **Alle rode velden in alle paspoorten verwijderen**
-   (menu Bewerken) verwijdert alle rode velden uit alle paspoorten in één stap (vraagt eerst bevestiging; één
-   **Ctrl+Z** maakt het ongedaan), handig na het importeren van een verfijnd Excel-bestand.
-   **Extra velden op klantverzoek:** markeer velden met **Bewerken → Markeren: extra veld (klantverzoek)**
-   (**Ctrl+Shift+E**, ook in het rechtermuismenu). Ze worden blauw in het Ontwerpblad en de Excel-exports (rood gaat
-   voor blauw); blauwe letters in een geïmporteerd verfijnd Excel-bestand worden weer als extra herkend.
-   **Objecttypen:** **Bewerken → Objecttypen…** (**Ctrl+T**) verplaatst één of meer objecttypen naar een ander
-   paspoort (velden, voetnoten en annotaties volgen) of verwijdert ze uit het paspoort. Een paspoort houdt minstens één
-   type; **Alles herstellen** maakt de wijzigingen ongedaan. Ze gelden alleen voor de sessie, zoals samenvoegingen en
-   hernoemingen, en zijn niet beschikbaar bij een geïmporteerd verfijnd Excel-bestand.
+   verwijderingen worden per paspoort en specificatie bewaard en bij de volgende start hersteld. Zie
+   [Paspoorten bewerken](#paspoorten-bewerken) voor bulksgewijs verwijderen, extra velden en objecttypen.
    **Ontwerpprofielen:** *Rotterdam v3* heeft maximaal 5 velden per rij en bevat *Gekoppelde objecten (Sem.Rel)*,
    *Inwinningsinformatie (Sem.Rel)*, een kolom *Datum* in Memo, *Distributiegebied*/*Stroomgebied* in Locatie informatie
    en *Beheerobjectomschrijving* in Overige informatie. Bij het importeren van een verfijnd Excel-bestand wordt tekst
@@ -161,6 +153,23 @@ Het logbestand staat in `%LOCALAPPDATA%\iAssetPassportDesigner\passport_designer
     regels. Opmaak en layout blijven ongewijzigd en het originele bestand verandert niet. Bevat het blad tekeningen,
     dan waarschuwt het programma.
 
+### Paspoorten bewerken
+
+Alles hieronder staat in het menu **Bewerken** en valt onder **Ctrl+Z** / **Ctrl+Y**.
+
+- **Alle rode velden in alle paspoorten verwijderen** haalt alle rode (te controleren) velden uit alle paspoorten in
+  één stap. Het vraagt eerst bevestiging en één **Ctrl+Z** maakt het ongedaan. Handig na het importeren van een
+  verfijnd Excel-bestand waarin de klant ongewenste velden rood heeft gemarkeerd.
+- **Markeren: extra veld (klantverzoek)** (**Ctrl+Shift+X**, ook in het rechtermuismenu van het Ontwerpblad)
+  markeert velden die in de Unafact-specificatie ontbraken maar waar klanten om vroegen. Ze worden **blauw** in het
+  Ontwerpblad en de Excel-exports; rood (controleren) gaat voor blauw. Blauwe letters in een geïmporteerd verfijnd
+  Excel-bestand worden weer als extra herkend en het blad `_designer` legt ze vast als `extra`.
+- **Objecttypen…** (**Ctrl+T**) toont de objecttypen van het gekozen paspoort. Selecteer er één of meer en kies
+  **Verplaatsen naar paspoort…** (een ander bestaand paspoort) of **Uit paspoort verwijderen**. Velden, voetnoten en
+  annotaties worden opnieuw berekend. Een paspoort houdt altijd minstens één objecttype en **Alles herstellen** maakt
+  alle verplaatsingen en verwijderingen ongedaan. Deze wijzigingen gelden alleen voor de sessie (zoals
+  samenvoegingen en hernoemingen) en zijn niet beschikbaar bij een geïmporteerd verfijnd Excel-bestand.
+
 ### Velden herschikken
 
 In het tabblad **Ontwerpblad** sleep je een veld naar een andere plek: in dezelfde rij, een andere rij of een andere
@@ -208,7 +217,7 @@ overslaan / Annuleren**. Mislukte afbeeldingen staan in het verslag, met **Map o
 | Alleen velden met Opnemen = "Ja" (menu Beeld) | Ctrl+Alt+O |
 | Minimale dataset markeren (menu Beeld) | Ctrl+Shift+M |
 | Markeren: controleren met klant (menu Bewerken) | Ctrl+Shift+V |
-| Markeren: extra veld (menu Bewerken) | Ctrl+Shift+E |
+| Markeren: extra veld (menu Bewerken) | Ctrl+Shift+X |
 | Objecttypen… (menu Bewerken) | Ctrl+T |
 | Veld verwijderen / Veldwijziging ongedaan maken (menu Bewerken) | Del / Ctrl+Z |
 
