@@ -29,6 +29,7 @@ GREY = "D9D9D9"
 PURPLE = "D9D2E9"
 MUTED_COLOUR = "808080"  # letterkleur voor velden met Opnemen = Nee / font colour for Opnemen = Nee fields
 VERIFY_COLOUR = "C00000"  # rode letters: controleren met klant / red text: verify with customer
+EXTRA_COLOUR = "0000FF"  # blauwe letters: extra veld op klantverzoek / blue text: extra field requested by customer
 STRIPE_EDGE = 0.001
 COLUMN_WIDTH = 30
 MARGIN_WIDTH = 70
@@ -112,7 +113,7 @@ def _heading(cells: list[SheetCell], row: int, section: Section, tab: PassportTa
 
 def sheet_layout(
     tab: PassportTab, *, muted: set[str] | None = None, minimal: dict[str, MinimalMark] | None = None,
-    legend: dict[str, str] | None = None, verify: set[str] | None = None,
+    legend: dict[str, str] | None = None, verify: set[str] | None = None, extra: set[str] | None = None,
 ) -> SheetLayout:
     """Indeling van één paspoortontwerp zoals in het paspoortinrichting-bestand: titel, objecttypen eronder, secties
     met grijze/blauwe koppen, een lege kolom en de opmerkingen (verwijzingen naar objecttypen) ernaast.
@@ -123,10 +124,13 @@ def sheet_layout(
     ``minimal``: veldnaam -> kleur(en) van de minimale dataset; ``legend``: objecttype -> kleur (legenda onder
     'Objecttypes:'). ``verify``: veldnamen met 'controleren met klant' (rode letters).
     ``minimal``: field name -> minimal dataset colour(s); ``legend``: object type -> colour (legend under
-    'Objecttypes:'). ``verify``: field names marked 'verify with customer' (red text)."""
+    'Objecttypes:'). ``verify``: field names marked 'verify with customer' (red text).
+    ``extra``: veldnamen die klanten vroegen maar die niet in de specificatie staan (blauwe letters); rood wint.
+    ``extra``: field names customers asked for that are not in the specification (blue text); red wins."""
     muted = muted or set()
     minimal = minimal or {}
     verify = verify or set()
+    extra = extra or set()
     profile = tab.profile
     columns = profile.grid_columns
     margin_column = columns + 2  # één lege kolom tussen raster en opmerkingen / one empty column before the remarks
@@ -171,7 +175,10 @@ def sheet_layout(
                 is_muted = not is_notes and key in muted
                 mark = None if is_notes else minimal.get(key)
                 is_verify = not is_notes and key in verify
-                colour = VERIFY_COLOUR if is_verify else (MUTED_COLOUR if is_muted else "")
+                is_extra = not is_notes and key in extra
+                colour = (
+                    VERIFY_COLOUR if is_verify else EXTRA_COLOUR if is_extra else (MUTED_COLOUR if is_muted else "")
+                )
                 # Voorbeeldtekst van een herhaalbaar blok staat vanaf de tweede rij in het ontwerp.
                 # Sample text of a repeatable block shows from the second row on in the design.
                 text = cell.sample if section.repeater and row_index and cell.sample else cell.display
@@ -186,6 +193,7 @@ def sheet_layout(
                             part for part in (
                                 tr("minimal.tooltip", types=", ".join(mark.types)) if mark else "",
                                 tr("verify.tooltip") if is_verify else "",
+                                tr("extra.tooltip") if is_extra else "",
                             ) if part
                         ),
                     ),
@@ -216,10 +224,10 @@ def gradient_fill(colours: tuple[str, ...]) -> GradientFill:
 
 def write_tab(
     sheet: Worksheet, tab: PassportTab, *, muted: set[str] | None = None, minimal: dict[str, MinimalMark] | None = None,
-    legend: dict[str, str] | None = None, verify: set[str] | None = None,
+    legend: dict[str, str] | None = None, verify: set[str] | None = None, extra: set[str] | None = None,
 ) -> None:
     """Schrijf één paspoortontwerp naar een tabblad. / Write one passport design to a sheet."""
-    layout = sheet_layout(tab, muted=muted, minimal=minimal, legend=legend, verify=verify)
+    layout = sheet_layout(tab, muted=muted, minimal=minimal, legend=legend, verify=verify, extra=extra)
     for item in layout.cells:
         target = sheet.cell(row=item.row, column=item.column, value=item.value or None)
         if item.fill_stops:
@@ -329,6 +337,7 @@ def write_metadata(
     reference_sheets: list[str] | None = None, *, only_included: bool = True, minimal_shown: bool = False,
     verify: dict[str, set[str]] | None = None, deleted: dict[str, set[str]] | None = None,
     layouts: dict[str, dict[str, object]] | None = None, legend_rows: dict[str, tuple[int, int]] | None = None,
+    extra: dict[str, set[str]] | None = None,
 ) -> None:
     """Verborgen blad '_designer' met sleutel/waarde-regels (versie, profiel, bronnen, filterkolom en per ontwerpblad
     de objecttypen, samenvoeging en voetnoten als JSON). Hidden '_designer' sheet with key/value rows (version,
@@ -356,6 +365,8 @@ def write_metadata(
         }
         if verify and verify.get(title):
             info["verify"] = sorted(verify[title])
+        if extra and extra.get(title):
+            info["extra"] = sorted(extra[title])
         if deleted and deleted.get(title):
             info["deleted"] = sorted(deleted[title])
         if layouts and layouts.get(title):
@@ -373,7 +384,7 @@ def export_workbook(
     *, only_included: bool = True,
     minimal_by_tab: dict[str, tuple[dict[str, MinimalMark], dict[str, str]]] | None = None,
     verify_by_tab: dict[str, set[str]] | None = None, deleted_by_tab: dict[str, set[str]] | None = None,
-    layout_by_tab: dict[str, dict[str, object]] | None = None,
+    layout_by_tab: dict[str, dict[str, object]] | None = None, extra_by_tab: dict[str, set[str]] | None = None,
 ) -> Path:
     """Schrijf alle ontwerpen naar één xlsx-bestand; ``sheet_names`` vervangt desgewenst de tabbladnamen (bijv. per
     objecttype). Met ``spec`` komen er bronbladen bij ('Bron Objecttypen', 'Bron Attributen'); altijd komt er een
@@ -398,6 +409,7 @@ def export_workbook(
     titles: list[str] = []
     by_title_verify: dict[str, set[str]] = {}
     by_title_deleted: dict[str, set[str]] = {}
+    by_title_extra: dict[str, set[str]] = {}
     by_title_layout: dict[str, dict[str, object]] = {}
     by_title_legend: dict[str, tuple[int, int]] = {}
     for tab, name in zip(tabs, names, strict=True):
@@ -406,11 +418,13 @@ def export_workbook(
         muted = excluded_labels(spec, tab=tab) if spec is not None and not only_included else set()
         marks, legend = (minimal_by_tab or {}).get(name, ({}, {}))
         verify = (verify_by_tab or {}).get(name, set())
-        write_tab(sheet, tab, muted=muted, minimal=marks, legend=legend, verify=verify)
+        extra = (extra_by_tab or {}).get(name, set())
+        write_tab(sheet, tab, muted=muted, minimal=marks, legend=legend, verify=verify, extra=extra)
         if legend and tab.profile.header_lines:
             last = 3 + len(legend) // tab.profile.grid_columns  # chips = len(legend) + 1 ('All types')
             by_title_legend[sheet.title] = (3, last)
         by_title_verify[sheet.title] = verify
+        by_title_extra[sheet.title] = extra
         by_title_deleted[sheet.title] = (deleted_by_tab or {}).get(name, set())
         if layout_by_tab and layout_by_tab.get(name):
             by_title_layout[sheet.title] = layout_by_tab[name]
@@ -419,7 +433,7 @@ def export_workbook(
     write_metadata(
         workbook, tabs, titles, spec, used, references, only_included=only_included,
         minimal_shown=bool(minimal_by_tab), verify=by_title_verify, deleted=by_title_deleted, layouts=by_title_layout,
-        legend_rows=by_title_legend,
+        legend_rows=by_title_legend, extra=by_title_extra,
     )
     target = Path(path)
     workbook.save(target)

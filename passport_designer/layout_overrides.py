@@ -80,11 +80,15 @@ class TabOverride:
     # Relatieblokken en hernoemde standaardblokken (zie relation_blocks) / relation blocks and renamed standard blocks
     blocks: tuple[RelationBlock, ...] = ()
     block_edits: tuple[tuple[str, BlockEdit], ...] = ()
+    # Extra velden: door klanten gevraagd maar niet in de specificatie (blauwe letters) / extra fields: requested by
+    # customers but missing in the specification (blue text)
+    extra: frozenset[str] = frozenset()
 
     @property
     def is_empty(self) -> bool:
         return (
             not self.verify and not self.deleted and self.layout is None and not self.blocks and not self.block_edits
+            and not self.extra
         )
 
 
@@ -101,6 +105,22 @@ def toggle_verify(override: TabOverride, *, labels: Iterable[str]) -> TabOverrid
     if keys <= override.verify:
         return replace(override, verify=override.verify - keys)
     return replace(override, verify=override.verify | keys)
+
+
+def toggle_extra(override: TabOverride, *, labels: Iterable[str]) -> TabOverride:
+    """Markeer velden als extra (blauwe letters); al gemarkeerd: markering weg.
+    Mark fields as extra (blue text); when all are marked already, the mark is removed."""
+    keys = _keys(labels)
+    if not keys:
+        return override
+    if keys <= override.extra:
+        return replace(override, extra=override.extra - keys)
+    return replace(override, extra=override.extra | keys)
+
+
+def extra_in(tab: PassportTab, override: TabOverride) -> set[str]:
+    """De extra-gemarkeerde veldnamen die in ``tab`` voorkomen. / The extra-marked field names present in ``tab``."""
+    return set(override.extra) & set(tab_labels(tab))
 
 
 def delete_fields(override: TabOverride, *, labels: Iterable[str]) -> TabOverride:
@@ -551,6 +571,8 @@ def reset_block_edit(
 def override_to_dict(override: TabOverride) -> dict[str, object]:
     """JSON-vriendelijke weergave van één paspoort. / JSON-friendly form of one passport."""
     data: dict[str, object] = {"verify": sorted(override.verify), "deleted": sorted(override.deleted)}
+    if override.extra:
+        data["extra"] = sorted(override.extra)
     if override.blocks:
         data["blocks"] = [
             {"title": b.title, "element": b.element, "columns": list(b.columns), "samples": list(b.samples),
@@ -609,6 +631,7 @@ def override_from_dict(data: object) -> TabOverride:
         return TabOverride(
             frozenset(str(v) for v in data.get("verify", [])), frozenset(str(v) for v in data.get("deleted", [])),
             layout, frozenset(str(v) for v in data.get("known", [])), blocks, block_edits,
+            frozenset(str(v) for v in data.get("extra", [])),
         )
     except (AssertionError, KeyError, TypeError, ValueError, AttributeError) as exc:
         raise LayoutFileError("The layout data is not valid.") from exc

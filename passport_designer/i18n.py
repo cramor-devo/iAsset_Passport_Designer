@@ -269,6 +269,43 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "nl": 'De geladen specificatie heeft geen kolom "MinimaleDataset".',
     },
     "verify.tooltip": {"en": "Verify with customer", "nl": "Controleren met klant"},
+    "extra.tooltip": {
+        "en": "Extra: requested by customer, not in the specification",
+        "nl": "Extra: gevraagd door klant, niet in de specificatie",
+    },
+    "extra.mark": {"en": "Mark: extra field (customer request)", "nl": "Markeren: extra veld (klantverzoek)"},
+    "types.manage": {"en": "Object &types…", "nl": "Object&typen…"},
+    "types.title": {"en": "Object types of {tab}", "nl": "Objecttypen van {tab}"},
+    "types.text": {
+        "en": "Select one or more object types, then move them to another passport or delete them from this one.",
+        "nl": "Kies één of meer objecttypen en verplaats ze naar een ander paspoort of verwijder ze uit dit paspoort.",
+    },
+    "types.move": {"en": "Move to passport…", "nl": "Verplaatsen naar paspoort…"},
+    "types.delete": {"en": "Delete from passport", "nl": "Uit paspoort verwijderen"},
+    "types.restore": {
+        "en": "Restore all moved and deleted object types",
+        "nl": "Alle verplaatste en verwijderde objecttypen herstellen",
+    },
+    "types.confirm_delete": {
+        "en": "Delete {count} object type(s) from passport {tab}? Their fields disappear unless other types use them.",
+        "nl": "{count} objecttype(n) uit paspoort {tab} verwijderen? Hun velden verdwijnen, behalve als andere "
+              "typen ze gebruiken.",
+    },
+    "types.moved": {"en": "Moved {count} object type(s) to {tab}", "nl": "{count} objecttype(n) verplaatst naar {tab}"},
+    "types.deleted": {"en": "Deleted {count} object type(s)", "nl": "{count} objecttype(n) verwijderd"},
+    "types.last": {
+        "en": "A passport must keep at least one object type.",
+        "nl": "Een paspoort moet minstens één objecttype houden.",
+    },
+    "types.not_imported": {
+        "en": "Not available for an imported refined Excel; go back to the generated passports first.",
+        "nl": "Niet beschikbaar bij een geïmporteerde verfijnde Excel; ga eerst terug naar de gegenereerde paspoorten.",
+    },
+    "types.reset_done": {
+        "en": "Moved and deleted object types restored",
+        "nl": "Verplaatste en verwijderde objecttypen hersteld",
+    },
+    "undo.types": {"en": "object type change", "nl": "objecttypewijziging"},
     "spec.orphan": {
         "en": 'Object type "{name}" has attributes but no row in Objecttypen',
         "nl": 'Objecttype "{name}" heeft attributen maar geen regel in Objecttypen',
@@ -279,6 +316,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "verify.delete_marked": {
         "en": "Delete all fields marked for verification", "nl": "Alle te controleren velden verwijderen",
     },
+    "verify.delete_marked_all": {
+        "en": "Delete all red fields in all passports", "nl": "Alle rode velden in alle paspoorten verwijderen",
+    },
+    "verify.confirm_all": {
+        "en": "Delete {count} red (marked) fields from {tabs} passport(s)?",
+        "nl": "{count} rode (gemarkeerde) velden verwijderen uit {tabs} paspoort(en)?",
+    },
+    "verify.deleted_all": {"en": "Deleted {count} red fields", "nl": "{count} rode velden verwijderd"},
     "verify.restore": {"en": "Restore deleted fields…", "nl": "Verwijderde velden herstellen…"},
     "verify.undo": {"en": "&Undo field change", "nl": "Veldwijziging &ongedaan maken"},
     "layout.redo": {"en": "&Redo field change", "nl": "Veldwijziging &opnieuw uitvoeren"},

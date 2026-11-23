@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.6
+- Added: **Edit → Object types…** (Ctrl+T). Move one or more object types to another passport (fields, footnotes and annotations are recalculated) or delete a single object type from a passport. A passport keeps at least one type; **Restore all** undoes it. Undo/Redo cover it; session-only like merges and renames, and not available for an imported refined Excel.
+- Added: **Edit → Mark: extra field (customer request)** (Ctrl+Shift+E, also in the Design sheet context menu). Extra fields turn blue in the Design sheet and the Excel exports (red "verify" wins), are stored in the layout and the `_designer` sheet (`extra`), and blue text in an imported refined Excel is recognised as extra.
+- Added: **Edit → Delete all red fields in all passports**: removes every red (verify) field from all passports in one undoable step, after confirmation.
+
 ## 0.5.5 - 2026-11-20
 - Removed: the six wave-1 road/sign relation blocks (*Constructielagen*, *Wegvak informatie*, …) are no longer part of the default design, so a passport named e.g. "Constructie" or "Paal" no longer gets them. `rotterdam_v3_relations.json` is now empty (the loader stays for user files). *wegcategorie duurzaam veilig* is removed from *Beleidsinformatie*.
 - Added: **Edit → Relation blocks…** (Ctrl+B, also in the Design sheet context menu). Add a relation block per passport (name, relation type 17–23, optionally 24–27, repeats, up to 5 column labels with sample data) and rename the standard blocks (title, column labels, sample data) for this passport or all passports, with **Reset to standard**, Up/Down and Delete. The payload uses the chosen relation type id and emits no template `visibilities`. Undo/Redo cover every change; blocks are saved with the passport layout and the layout JSON. Sample data appears in the mockup and, from the second repeat row, in the Excel Design sheet.

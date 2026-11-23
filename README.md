@@ -85,7 +85,15 @@ The log file is stored at `%LOCALAPPDATA%\iAssetPassportDesigner\passport_design
    undoes the last change. Deleted fields leave the payload, the views and the exports and are listed on the Validation
    tab; fields in repeatable sections cannot be deleted. **View → Show "verify with customer" marks** hides the red
    colour. Importing a refined Excel recognises red text and the green fill `92D050` as marks. Marks and deletions are
-   not remembered between sessions yet.
+   not remembered between sessions yet. **Delete all red fields in all passports** (Edit menu) removes every red field
+   from every passport in one step (asks first; one **Ctrl+Z** undoes it), handy after importing a refined Excel.
+   **Extra fields requested by customers:** mark fields as **Edit → Mark: extra field (customer request)**
+   (**Ctrl+Shift+E**, also in the right-click menu). They turn blue in the Design sheet and the Excel exports (red wins
+   over blue); blue text in an imported refined Excel is recognised as extra again.
+   **Object types:** **Edit → Object types…** (**Ctrl+T**) moves one or more object types to another passport (fields,
+   footnotes and annotations follow) or deletes them from the passport. A passport keeps at least one type;
+   **Restore all** undoes the changes, which are session-only like merges and renames and are unavailable for an
+   imported refined Excel.
    **Design profiles:** *Rotterdam v3* has at most 5 fields per row and includes *Gekoppelde objecten (Sem.Rel)*,
    *Inwinningsinformatie (Sem.Rel)*, a *Datum* column in Memo, *Distributiegebied*/*Stroomgebied* in Locatie informatie
    and *Beheerobjectomschrijving* in Overige informatie. When importing a refined Excel, text beside the grid is read as
@@ -188,6 +196,8 @@ in the report, with **Open folder**.
 | Only fields with Opnemen = "Ja" (View menu) | Ctrl+Alt+O |
 | Highlight minimal dataset (View menu) | Ctrl+Shift+M |
 | Mark: verify with customer (Edit menu) | Ctrl+Shift+V |
+| Mark: extra field (Edit menu) | Ctrl+Shift+E |
+| Object types… (Edit menu) | Ctrl+T |
 | Delete field / Undo / Redo field change (Edit menu) | Del / Ctrl+Z / Ctrl+Y |
 
 ## Design profiles
