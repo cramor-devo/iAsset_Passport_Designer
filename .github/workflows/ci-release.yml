@@ -69,7 +69,7 @@ jobs:
           lines, keep = [], False
           for line in open("CHANGELOG.md", encoding="utf-8"):
               if line.startswith("## "):
-                  keep = line[3:].strip() == version
+                  keep = line[3:].split(" - ")[0].strip() == version
                   continue
               if keep:
                   lines.append(line.rstrip("\n"))
